@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Programaciones de Quirófano</title>
+    <link href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        h2 {
+            text-align: center;
+        }
+        .table-responsive {
+            overflow-x: auto;
+        }
+        .fecha-header {
+            background-color: #f8f9fa;
+            font-weight: bold;
+            text-align: center;
+            padding: 10px;
+            margin-top: 10px;
+        }
+        @media print {
+            body * {
+                visibility: hidden;
+            }
+            .print-container, .print-container * {
+                visibility: visible;
+            }
+            .print-container {
+                position: absolute;
+                left: 0;
+                top: 0;
+                width: 100%;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container mt-5 print-container">
+        <h2 class="text-center mb-4">Programaciones de Quirófano</h2>
+
+        <button class="btn btn-primary mb-3" onclick="window.print()">Imprimir Programación</button>
+
+        <?php
+        $host = 'localhost';
+        $dbname = 'sitiosnuevos_hospital';
+        $username = 'sitiosnuevos_cirtugia';
+        $password = 'Realmedic2020';
+
+        try {
+            $pdo = new PDO("mysql:host=$host;dbname=$dbname;charset=utf8", $username, $password);
+            $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+
+            $sql = "SELECT * FROM programacion_quirofano ORDER BY fecha, h_cirugia";
+            $stmt = $pdo->query($sql);
+
+            $currentDate = null;
+
+            echo "<div class='table-responsive'>";
+            echo "<table class='table table-striped table-bordered'>";
+            echo "<thead class='thead-dark'>
+                    <tr>
+                        <th>ID</th>
+                        <th>Día</th>
+                        <th>Fecha</th>
+                        <th>Paciente</th>
+                        <th>Edad</th>
+                        <th>Hora de Ingreso</th>
+                        <th>Hora de Cirugía</th>
+                        <th>Procedimiento</th>
+                        <th>Quirófano</th>
+                        <th>Cirujano</th>
+                        <th>Anestesiólogo</th>
+                        <th>Habitación</th>
+                        <th>Casa Comercial</th>
+                        <th>Mesa de Tracción</th>
+                        <th>Laboratorio</th>
+                        <th>Arco en C</th>
+                        <th>Acciones</th>
+                    </tr>
+                  </thead>";
+            echo "<tbody>";
+
+            while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+                if ($currentDate !== $row['fecha']) {
+                    $currentDate = $row['fecha'];
+                    echo "<tr><td colspan='17' class='fecha-header'>Fecha: " . date('d-m-Y', strtotime($currentDate)) . "</td></tr>";
+                }
+
+                echo "<tr>
+                        <td>{$row['id']}</td>
+                        <td>{$row['dia']}</td>
+                        <td>{$row['fecha']}</td>
+                        <td>{$row['paciente']}</td>
+                        <td>{$row['edad']}</td>
+                        <td>{$row['h_ingreso']}</td>
+                        <td>{$row['h_cirugia']}</td>
+                        <td>{$row['procedimiento']}</td>
+                        <td>{$row['quirófano']}</td>
+                        <td>{$row['cirujano']}</td>
+                        <td>{$row['anestesiologo']}</td>
+                        <td>{$row['habitacion']}</td>
+                        <td>{$row['casa_comercial']}</td>
+                        <td>{$row['mesa_traccion']}</td>
+                        <td>{$row['laboratorio']}</td>
+                        <td>{$row['arco_en_c']}</td>
+                        <td><a href='modificar_cirugia.php?id={$row['id']}' class='btn btn-warning btn-sm'>Modificar</a></td>
+                      </tr>";
+            }
+
+            echo "</tbody>";
+            echo "</table>";
+            echo "</div>";
+        } catch (PDOException $e) {
+            echo "<div class='alert alert-danger' role='alert'>Error: " . $e->getMessage() . "</div>";
+        }
+        ?>
+    </div>
+
+    <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.5.2/dist/umd/popper.min.js"></script>
+    <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+</body>
+</html>

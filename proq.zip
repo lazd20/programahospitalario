@@ -1,0 +1,183 @@
+<?php
+require_once __DIR__ . '/../auth.php';
+require_login();
+require_role(['admin']);
+require_once __DIR__ . '/../helpers.php';
+
+$BASE = $GLOBALS['BASE_URL'] ?? '';
+
+$id = (int)($_GET['id'] ?? 0);
+if ($id <= 0) {
+  flash_set('error', 'ID inválido.');
+  redirect($BASE . '/users/list.php');
+}
+
+// Cargar usuario
+$st = $pdo->prepare("SELECT id, username, nombre, apellido, rol, sello_path FROM users WHERE id=? LIMIT 1");
+$st->execute([$id]);
+$user = $st->fetch();
+
+if (!$user) {
+  flash_set('error', 'Usuario no encontrado.');
+  redirect($BASE . '/users/list.php');
+}
+
+$err = null;
+
+$values = [
+  'username' => (string)$user['username'],
+  'nombre' => (string)$user['nombre'],
+  'apellido' => (string)$user['apellido'],
+  'rol' => (string)$user['rol'],
+];
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+  $values['username'] = strtolower(trim((string)($_POST['username'] ?? '')));
+  $values['nombre']   = trim((string)($_POST['nombre'] ?? ''));
+  $values['apellido'] = trim((string)($_POST['apellido'] ?? ''));
+  $values['rol']      = trim((string)($_POST['rol'] ?? 'residente'));
+  $newPass            = (string)($_POST['password'] ?? '');
+  $newPass2           = (string)($_POST['password2'] ?? '');
+
+  // Validaciones
+  if ($values['username'] === '' || $values['nombre'] === '' || $values['apellido'] === '') {
+    $err = 'Usuario, nombre y apellido son obligatorios.';
+  } elseif (!preg_match('/^[a-z0-9._-]{3,50}$/', $values['username'])) {
+    $err = 'El usuario debe tener 3-50 caracteres y solo puede incluir letras/números y . _ -';
+  } elseif (!in_array($values['rol'], ['admin','residente','especialista'], true)) {
+    $err = 'Rol inválido.';
+  } else {
+    // Username único (excepto este mismo usuario)
+    $st = $pdo->prepare('SELECT id FROM users WHERE username=? AND id<>? LIMIT 1');
+    $st->execute([$values['username'], $id]);
+    if ($st->fetchColumn()) {
+      $err = 'Ese usuario ya existe.';
+    }
+  }
+
+  // Validación contraseña opcional
+  $changePass = false;
+  if (!$err && ($newPass !== '' || $newPass2 !== '')) {
+    if (strlen($newPass) < 6) {
+      $err = 'La nueva contraseña debe tener al menos 6 caracteres.';
+    } elseif ($newPass !== $newPass2) {
+      $err = 'Las nuevas contraseñas no coinciden.';
+    } else {
+      $changePass = true;
+    }
+  }
+
+  if (!$err) {
+    if ($changePass) {
+      $hash = password_hash($newPass, PASSWORD_BCRYPT);
+      $up = $pdo->prepare("UPDATE users SET username=?, nombre=?, apellido=?, rol=?, password_hash=? WHERE id=?");
+      $up->execute([$values['username'], $values['nombre'], $values['apellido'], $values['rol'], $hash, $id]);
+    } else {
+      $up = $pdo->prepare("UPDATE users SET username=?, nombre=?, apellido=?, rol=? WHERE id=?");
+      $up->execute([$values['username'], $values['nombre'], $values['apellido'], $values['rol'], $id]);
+    }
+
+    flash_set('success', 'Usuario actualizado.');
+    redirect($BASE . '/users/list.php');
+  }
+}
+?>
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Editar usuario | Evo/Prx</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body>
+<?php include __DIR__ . '/../partials/navbar.php'; ?>
+
+<div class="container py-4" style="max-width: 900px;">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+      <h4 class="mb-0">Editar usuario</h4>
+      <div class="text-muted small">
+        ID #<?= (int)$user['id'] ?> · Sello:
+        <?php if (!empty($user['sello_path'])): ?>
+          <span class="badge text-bg-success">Sí</span>
+        <?php else: ?>
+          <span class="badge text-bg-warning">No</span>
+        <?php endif; ?>
+      </div>
+    </div>
+    <a class="btn btn-outline-secondary" href="<?= e($BASE) ?>/users/list.php">Volver</a>
+  </div>
+
+  <?php include __DIR__ . '/../partials/flash.php'; ?>
+
+  <?php if ($err): ?>
+    <div class="alert alert-danger"><?= e($err) ?></div>
+  <?php endif; ?>
+
+  <form method="post" class="card shadow-sm">
+    <div class="card-body">
+      <div class="row g-3">
+        <div class="col-md-4">
+          <label class="form-label">Usuario</label>
+          <input class="form-control" name="username" required value="<?= e($values['username']) ?>">
+        </div>
+
+        <div class="col-md-4">
+          <label class="form-label">Nombre</label>
+          <input class="form-control" name="nombre" required value="<?= e($values['nombre']) ?>">
+        </div>
+
+        <div class="col-md-4">
+          <label class="form-label">Apellido</label>
+          <input class="form-control" name="apellido" required value="<?= e($values['apellido']) ?>">
+        </div>
+
+        <div class="col-md-4">
+          <label class="form-label">Rol</label>
+          <select class="form-select" name="rol" required>
+            <option value="residente"    <?= $values['rol']==='residente'?'selected':'' ?>>Residente</option>
+            <option value="especialista" <?= $values['rol']==='especialista'?'selected':'' ?>>Especialista</option>
+            <option value="admin"        <?= $values['rol']==='admin'?'selected':'' ?>>Admin</option>
+          </select>
+        </div>
+
+        <div class="col-12">
+          <hr>
+          <div class="fw-semibold mb-2">Cambiar contraseña (opcional)</div>
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label">Nueva contraseña</label>
+              <input type="password" class="form-control" name="password" placeholder="Dejar en blanco para no cambiar">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Repetir nueva contraseña</label>
+              <input type="password" class="form-control" name="password2" placeholder="Dejar en blanco para no cambiar">
+            </div>
+          </div>
+          <div class="form-text mt-2">
+            El sello/rúbrica se administra en “Mi sello” cuando el usuario inicia sesión.
+          </div>
+        </div>
+
+        <?php if (!empty($user['sello_path'])): ?>
+          <div class="col-12">
+            <div class="mt-2">
+              <div class="text-muted small mb-1">Vista previa del sello:</div>
+              <img src="<?= e($BASE) ?>/<?= e($user['sello_path']) ?>" class="border rounded p-2 bg-white" style="max-height:110px;" alt="sello">
+            </div>
+          </div>
+        <?php endif; ?>
+      </div>
+    </div>
+
+    <div class="card-footer d-flex gap-2">
+      <button class="btn btn-primary">Guardar cambios</button>
+      <a class="btn btn-outline-secondary" href="<?= e($BASE) ?>/users/list.php">Cancelar</a>
+    </div>
+  </form>
+</div>
+
+<?php include __DIR__ . '/../partials/footer.php'; ?>
+</body>
+</html>

@@ -1,0 +1,142 @@
+<?php
+// /public_html/evoprx/residentes/membrete.php
+require_once __DIR__ . '/../auth.php';
+require_login();
+require_once __DIR__ . '/../helpers.php';
+
+date_default_timezone_set('America/Guayaquil');
+
+if (!isset($_GET['id']) || (int)$_GET['id'] <= 0) {
+    die("⚠️ ID no especificado.");
+}
+$id = (int)$_GET['id'];
+
+// Helper: verificar si existe una columna (para compatibilidad con migraciones)
+function hasColumn(PDO $pdo, string $table, string $column): bool {
+    $sql = "SELECT COUNT(*)
+            FROM INFORMATION_SCHEMA.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND TABLE_NAME = ?
+              AND COLUMN_NAME = ?";
+    $st = $pdo->prepare($sql);
+    $st->execute([$table, $column]);
+    return (int)$st->fetchColumn() > 0;
+}
+
+// Helper: arma nombre paciente desde columnas nuevas o viejas
+function buildPacienteFromRow(array $r): string {
+    // Nuevo esquema (nombre1/2, apellido1/2)
+    $parts = [];
+    foreach (['apellido1','apellido2','nombre1','nombre2'] as $k) {
+        if (!empty($r[$k])) $parts[] = trim((string)$r[$k]);
+    }
+    $full = trim(preg_replace('/\s+/', ' ', implode(' ', $parts)));
+    if ($full !== '') return $full;
+
+    // Esquema viejo (nombre/apellido)
+    $n = trim((string)($r['nombre'] ?? ''));
+    $a = trim((string)($r['apellido'] ?? ''));
+    return trim(preg_replace('/\s+/', ' ', $a.' '.$n));
+}
+
+try {
+    $pdo->exec("SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci");
+
+    // Tablas con prefijo hosp_
+    $tIngresos = 'hosp_ingresos';
+    $tHabit   = 'hosp_habitaciones';
+    $tCir     = 'hosp_cirujanos';
+
+    // Campos según esquema
+    $selectPaciente = '';
+    if (hasColumn($pdo, $tIngresos, 'nombre1') || hasColumn($pdo, $tIngresos, 'apellido1')) {
+        $selectPaciente = "i.nombre1, i.nombre2, i.apellido1, i.apellido2";
+    } else {
+        $selectPaciente = "i.nombre, i.apellido";
+    }
+
+    $sql = "
+        SELECT
+            i.*,
+            $selectPaciente,
+            h.numero AS habitacion_numero,
+            h.descripcion AS habitacion_desc,
+            c.nombre AS nombre_cirujano
+        FROM {$tIngresos} i
+        LEFT JOIN {$tHabit} h ON i.habitacion_id = h.id
+        LEFT JOIN {$tCir} c   ON i.cirujano_id = c.id
+        WHERE i.id = ?
+        LIMIT 1
+    ";
+
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute([$id]);
+    $ingreso = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    if (!$ingreso) {
+        die("⚠️ Ingreso no encontrado.");
+    }
+
+    $pacienteNombre = buildPacienteFromRow($ingreso);
+    $tratanteNombre = trim((string)($ingreso['nombre_cirujano'] ?? ''));
+    if ($tratanteNombre === '') $tratanteNombre = trim((string)($ingreso['tratante'] ?? ''));
+
+    $habitacionTxt = "Emergencia / Observación";
+    if (!empty($ingreso['habitacion_numero'])) {
+        $habitacionTxt = "Habitación " . $ingreso['habitacion_numero'];
+        if (!empty($ingreso['habitacion_desc'])) {
+            $habitacionTxt .= " - " . $ingreso['habitacion_desc'];
+        }
+    }
+
+    // Imagen del membrete (en el mismo directorio residentes/)
+    // Recomendación: renombrar el archivo a algo sin espacios, pero aquí lo soportamos.
+    $imgFile = "Diseño sin título (16).png";
+    $imgUrl  = $imgFile; // relativo al mismo directorio
+
+} catch (Throwable $e) {
+    die("❌ Error: " . $e->getMessage());
+}
+?>
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Membrete</title>
+    <style>
+        @page { size: 20cm 6cm; margin: 0; }
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 1.5cm;
+            background-color: #fff;
+        }
+        .container { width: 100%; height: 100%; box-sizing: border-box; }
+        .header { position: absolute; top: 0; left: 0; width: 100%; }
+        .header img { width: 100%; height: 220px; }
+        .content { position: absolute; top: 40px; padding-left: 80px; }
+        .label { font-weight: bold; color: #333; }
+        .value { margin-bottom: 10px; font-size: 18px; }
+        @media print { .no-print { display: none; } }
+    </style>
+</head>
+<body onload="window.print()">
+<div class="container">
+    <div class="header">
+        <img src="<?= htmlspecialchars($imgUrl) ?>" alt="Encabezado Realmedic">
+    </div>
+
+    <div class="content">
+        <div class="value">
+            <span class="label">Paciente:</span> <?= htmlspecialchars($pacienteNombre) ?>
+        </div>
+        <div class="value">
+            <span class="label">Tratante:</span> <?= htmlspecialchars($tratanteNombre !== '' ? $tratanteNombre : '—') ?>
+        </div>
+        <div class="value">
+            <span class="label">Habitación:</span> <?= htmlspecialchars($habitacionTxt) ?>
+        </div>
+    </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,445 @@
+<?php
+// /public_html/evoprx/residentes/registrar.php
+require_once __DIR__ . '/../auth.php';
+require_login();
+require_once __DIR__ . '/../helpers.php';
+
+date_default_timezone_set('America/Guayaquil');
+header('Content-Type: text/html; charset=utf-8');
+
+/* =========================
+   Nuevo esquema de rol
+   ========================= */
+$u = function_exists('current_user') ? current_user() : null;
+
+// role/rol compatible (session vieja + session nueva + current_user)
+$role = (string)($_SESSION['role'] ?? ($_SESSION['rol'] ?? ($u['rol'] ?? ($u['role'] ?? ''))));
+
+// Permisos: ajusta si quieres permitir 'viewer' o 'resident'
+if (!in_array($role, ['admin', 'editor'], true)) {
+    $to = function_exists('base_url') ? base_url('/residentes/panel_ingresos.php') : 'panel_ingresos.php';
+    header("Location: {$to}");
+    exit;
+}
+
+/* =========================
+   Usuario en sesión
+   ========================= */
+$usuario_id = (int)($_SESSION['usuario_id'] ?? ($u['id'] ?? 0));
+if ($usuario_id <= 0) {
+    $to = function_exists('base_url') ? base_url('/residentes/login.php?e=sesion') : 'login.php?e=sesion';
+    header("Location: {$to}");
+    exit;
+}
+
+/* Helpers */
+function h($v) {
+    return htmlspecialchars((string)$v, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+}
+function hasColumn(PDO $pdo, string $table, string $column): bool {
+    $sql = "SELECT COUNT(*)
+            FROM INFORMATION_SCHEMA.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND TABLE_NAME = ?
+              AND COLUMN_NAME = ?";
+    $st = $pdo->prepare($sql);
+    $st->execute([$table, $column]);
+    return (int)$st->fetchColumn() > 0;
+}
+function cleanSpaces(string $s): string {
+    $s = trim($s);
+    $s = preg_replace('/\s+/', ' ', $s);
+    return trim($s);
+}
+
+try {
+    // $pdo viene cargado por auth.php / config.php (según tu estructura)
+    if (!isset($pdo) || !($pdo instanceof PDO)) {
+        throw new Exception("No hay conexión PDO disponible (\$pdo). Revisa auth.php/config.php.");
+    }
+
+    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+    $pdo->exec("SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci");
+
+    /* Verificar que el usuario exista en BD */
+    $chk = $pdo->prepare("SELECT 1 FROM hosp_usuarios WHERE id = ? LIMIT 1");
+    $chk->execute([$usuario_id]);
+    if (!$chk->fetchColumn()) {
+        session_unset();
+        session_destroy();
+        $to = function_exists('base_url') ? base_url('/residentes/login.php?e=usuario_invalido') : 'login.php?e=usuario_invalido';
+        header("Location: {$to}");
+        exit;
+    }
+} catch (Throwable $e) {
+    die("❌ Error validando usuario: " . h($e->getMessage()));
+}
+
+/* Obtener cirujanos */
+$cirujanos = [];
+try {
+    $stmt = $pdo->query("SELECT id, nombre FROM hosp_cirujanos ORDER BY nombre ASC");
+    $cirujanos = $stmt->fetchAll(PDO::FETCH_ASSOC);
+} catch (Throwable $e) {
+    die("❌ Error al obtener cirujanos: " . h($e->getMessage()));
+}
+
+/* Obtener tipos de ingreso */
+$tipos = [];
+try {
+    $tipos = $pdo->query("SELECT id, nombre FROM hosp_tipos_ingreso ORDER BY nombre ASC")->fetchAll(PDO::FETCH_ASSOC);
+} catch (Throwable $e) {
+    die("❌ Error al obtener tipos de ingreso: " . h($e->getMessage()));
+}
+
+/* Defaults */
+$default_nombre1  = '';
+$default_nombre2  = '';
+$default_apellido1= '';
+$default_apellido2= '';
+$default_cedula   = '';
+$default_fecha    = date('Y-m-d');
+$default_cirujano_id = '';
+$default_tipo_ingreso_id = '';
+$default_habitacion_id = '';
+
+$errorMsg = '';
+
+/* Procesar envío */
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $nombre1   = cleanSpaces($_POST['nombre1'] ?? '');
+    $nombre2   = cleanSpaces($_POST['nombre2'] ?? '');
+    $apellido1 = cleanSpaces($_POST['apellido1'] ?? '');
+    $apellido2 = cleanSpaces($_POST['apellido2'] ?? '');
+    $cedula    = cleanSpaces($_POST['cedula'] ?? '');
+
+    $fecha_entrada   = $_POST['fecha_entrada'] ?? $default_fecha;
+    $cirujano_id     = !empty($_POST['cirujano_id']) ? (int)$_POST['cirujano_id'] : null;
+    $tipo_ingreso_id = !empty($_POST['tipo_ingreso_id']) ? (int)$_POST['tipo_ingreso_id'] : null;
+    $habitacion_id   = !empty($_POST['habitacion_id']) ? (int)$_POST['habitacion_id'] : null;
+
+    // Validación mínima
+    if ($nombre1 === '' || $apellido1 === '' || $cedula === '' || empty($tipo_ingreso_id) || empty($cirujano_id)) {
+        $errorMsg = "Faltan datos obligatorios (Nombre 1, Apellido 1, Cédula, Médico tratante y Tipo de ingreso).";
+    }
+
+    // Obtener nombre de tratante
+    $tratante = '';
+    if ($errorMsg === '' && $cirujano_id) {
+        $st = $pdo->prepare("SELECT nombre FROM hosp_cirujanos WHERE id = ? LIMIT 1");
+        $st->execute([$cirujano_id]);
+        $row = $st->fetch(PDO::FETCH_ASSOC);
+        $tratante = $row ? (string)$row['nombre'] : '';
+    }
+
+    if ($errorMsg === '') {
+        try {
+            $pdo->beginTransaction();
+
+            // Si se envió habitación, comprobar que siga libre (evitar carrera)
+            if ($habitacion_id) {
+                $chkHab = $pdo->prepare("SELECT estado FROM hosp_habitaciones WHERE id = ? FOR UPDATE");
+                $chkHab->execute([$habitacion_id]);
+                $hab = $chkHab->fetch(PDO::FETCH_ASSOC);
+                if (!$hab) {
+                    throw new Exception("La habitación seleccionada no existe.");
+                }
+                if (strtolower(trim((string)$hab['estado'])) !== 'libre') {
+                    throw new Exception("La habitación ya no está disponible.");
+                }
+            }
+
+            // Compatibilidad con columnas antiguas si existieran
+            $t = 'hosp_ingresos';
+            $tiene_nombre   = hasColumn($pdo, $t, 'nombre');
+            $tiene_apellido = hasColumn($pdo, $t, 'apellido');
+            $tiene_nombre1  = hasColumn($pdo, $t, 'nombre1');
+            $tiene_nombre2  = hasColumn($pdo, $t, 'nombre2');
+            $tiene_apellido1= hasColumn($pdo, $t, 'apellido1');
+            $tiene_apellido2= hasColumn($pdo, $t, 'apellido2');
+            $tiene_cedula   = hasColumn($pdo, $t, 'cedula');
+
+            $nombre_full   = cleanSpaces($nombre1 . ' ' . $nombre2);
+            $apellido_full = cleanSpaces($apellido1 . ' ' . $apellido2);
+
+            // INSERT dinámico
+            $cols = [];
+            $vals = [];
+            $params = [];
+
+            if ($tiene_nombre1)   { $cols[] = "nombre1";   $vals[] = ":nombre1";   $params[":nombre1"] = $nombre1; }
+            if ($tiene_nombre2)   { $cols[] = "nombre2";   $vals[] = ":nombre2";   $params[":nombre2"] = ($nombre2 === '' ? null : $nombre2); }
+            if ($tiene_apellido1) { $cols[] = "apellido1"; $vals[] = ":apellido1"; $params[":apellido1"] = $apellido1; }
+            if ($tiene_apellido2) { $cols[] = "apellido2"; $vals[] = ":apellido2"; $params[":apellido2"] = ($apellido2 === '' ? null : $apellido2); }
+
+            if ($tiene_nombre)    { $cols[] = "nombre";    $vals[] = ":nombre";    $params[":nombre"] = $nombre_full; }
+            if ($tiene_apellido)  { $cols[] = "apellido";  $vals[] = ":apellido";  $params[":apellido"] = $apellido_full; }
+
+            if ($tiene_cedula)    { $cols[] = "cedula";    $vals[] = ":cedula";    $params[":cedula"] = $cedula; }
+
+            $cols[] = "fecha_entrada";   $vals[] = ":fecha_entrada";   $params[":fecha_entrada"] = $fecha_entrada;
+            $cols[] = "tratante";        $vals[] = ":tratante";        $params[":tratante"] = $tratante;
+
+            $cols[] = "cirujano_id";     $vals[] = ":cirujano_id";     $params[":cirujano_id"] = $cirujano_id;
+            $cols[] = "tipo_ingreso_id"; $vals[] = ":tipo_ingreso_id"; $params[":tipo_ingreso_id"] = $tipo_ingreso_id;
+
+            $cols[] = "estado";          $vals[] = "'ingresado'";
+
+            $cols[] = "residente_id";    $vals[] = "0";
+            $cols[] = "usuario_id";      $vals[] = ":usuario_id";      $params[":usuario_id"] = $usuario_id;
+
+            $cols[] = "habitacion_id";   $vals[] = ":habitacion_id";   $params[":habitacion_id"] = $habitacion_id;
+
+            $sql = "INSERT INTO hosp_ingresos (" . implode(", ", $cols) . ")
+                    VALUES (" . implode(", ", $vals) . ")";
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute($params);
+
+            // Ocupar habitación
+            if ($habitacion_id) {
+                $upd = $pdo->prepare("UPDATE hosp_habitaciones SET estado = 'ocupada' WHERE id = ?");
+                $upd->execute([$habitacion_id]);
+            }
+
+            $pdo->commit();
+
+            $to = function_exists('base_url') ? base_url('/residentes/panel_ingresos.php?ok=1') : 'panel_ingresos.php?ok=1';
+            header("Location: {$to}");
+            exit;
+
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) { $pdo->rollBack(); }
+            $errorMsg = "Error al registrar ingreso: " . $e->getMessage();
+        }
+    }
+
+    // Persistir valores si hubo error
+    $default_nombre1 = $nombre1;
+    $default_nombre2 = $nombre2;
+    $default_apellido1 = $apellido1;
+    $default_apellido2 = $apellido2;
+    $default_cedula = $cedula;
+    $default_fecha = $fecha_entrada;
+    $default_cirujano_id = $cirujano_id ?? '';
+    $default_tipo_ingreso_id = $tipo_ingreso_id ?? '';
+    $default_habitacion_id = $habitacion_id ?? '';
+}
+?>
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Registrar ingreso</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" />
+    <style>
+        .select2-container .select2-selection--single { height: 38px; padding: 6px 12px; }
+        .muted { color:#64748b; }
+    </style>
+</head>
+<body class="bg-light">
+<div class="container mt-5 mb-5">
+    <div class="card shadow-sm">
+        <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+            <h4 class="mb-0">Registrar nuevo ingreso</h4>
+            <a href="panel_ingresos.php" class="btn btn-outline-light btn-sm">← Volver</a>
+        </div>
+
+        <div class="card-body">
+            <?php if ($errorMsg !== ''): ?>
+                <div class="alert alert-danger"><?= h($errorMsg) ?></div>
+            <?php endif; ?>
+
+            <form method="post" autocomplete="off">
+                <div class="row g-2">
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label">Nombre 1 *</label>
+                        <input type="text" name="nombre1" class="form-control" required value="<?= h($default_nombre1) ?>">
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label">Nombre 2</label>
+                        <input type="text" name="nombre2" class="form-control" value="<?= h($default_nombre2) ?>">
+                    </div>
+
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label">Apellido 1 *</label>
+                        <input type="text" name="apellido1" class="form-control" required value="<?= h($default_apellido1) ?>">
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label">Apellido 2</label>
+                        <input type="text" name="apellido2" class="form-control" value="<?= h($default_apellido2) ?>">
+                    </div>
+
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label">Cédula *</label>
+                        <input type="text" name="cedula" class="form-control" required value="<?= h($default_cedula) ?>">
+                    </div>
+
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label">Fecha de ingreso *</label>
+                        <input type="date" name="fecha_entrada" value="<?= h($default_fecha) ?>" class="form-control" required>
+                    </div>
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label d-flex justify-content-between align-items-center">
+                        <span>Médico tratante *</span>
+                        <button type="button" class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#modalNuevoCirujano">
+                            + Nuevo médico
+                        </button>
+                    </label>
+
+                    <select name="cirujano_id" id="cirujano_id" class="form-select" required>
+                        <option value="">Seleccione un médico</option>
+                        <?php foreach ($cirujanos as $c): ?>
+                            <option value="<?= (int)$c['id'] ?>" <?= ((string)$default_cirujano_id === (string)$c['id']) ? 'selected' : '' ?>>
+                                <?= h($c['nombre']) ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+
+                    <small class="text-muted">Si no aparece, puede registrarlo con “+ Nuevo médico”.</small>
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label">Tipo de ingreso *</label>
+                    <select name="tipo_ingreso_id" class="form-select" required>
+                        <option value="">Seleccione</option>
+                        <?php foreach ($tipos as $tipo): ?>
+                            <option value="<?= (int)$tipo['id'] ?>" <?= ((string)$default_tipo_ingreso_id === (string)$tipo['id']) ? 'selected' : '' ?>>
+                                <?= h($tipo['nombre']) ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label">Habitación (opcional)</label>
+                    <select name="habitacion_id" class="form-select">
+                        <option value="">-- No asignar --</option>
+                        <?php
+                        $stmt = $pdo->query("SELECT id, numero, descripcion FROM hosp_habitaciones WHERE estado = 'libre' ORDER BY numero ASC");
+                        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+                            $desc = $row['descripcion'] ? " - {$row['descripcion']}" : '';
+                            $sel  = ((string)$default_habitacion_id === (string)$row['id']) ? 'selected' : '';
+                            echo "<option value=\"".(int)$row['id']."\" $sel>".h($row['numero'].$desc)."</option>";
+                        }
+                        ?>
+                    </select>
+                    <small class="text-muted">Si no asigna, queda como emergencia.</small>
+                </div>
+
+                <button type="submit" class="btn btn-primary w-100">Registrar ingreso</button>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Modal: Nuevo Médico -->
+<div class="modal fade" id="modalNuevoCirujano" tabindex="-1" aria-labelledby="modalNuevoCirujanoLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <form id="formNuevoCirujano" class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="modalNuevoCirujanoLabel">Registrar nuevo médico</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-3">
+          <label class="form-label">Nombre completo *</label>
+          <input type="text" name="nombre" class="form-control" maxlength="100" required>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Especialidad *</label>
+          <input type="text" name="especialidad" class="form-control" maxlength="100" required>
+        </div>
+        <div class="alert alert-danger d-none" id="errorNuevoCirujano"></div>
+        <div class="alert alert-success d-none" id="okNuevoCirujano"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+        <button type="submit" class="btn btn-primary" id="btnGuardarCirujano">Guardar</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
+
+<script>
+$(function() {
+    // Select2
+    $('#cirujano_id').select2({
+        placeholder: "Seleccione un médico",
+        allowClear: true,
+        width: '100%'
+    });
+
+    // Crear médico desde modal
+    $('#formNuevoCirujano').on('submit', function(e) {
+        e.preventDefault();
+        const $btn = $('#btnGuardarCirujano');
+        const $err = $('#errorNuevoCirujano');
+        const $ok  = $('#okNuevoCirujano');
+
+        $err.addClass('d-none').text('');
+        $ok.addClass('d-none').text('');
+
+        const formData = new FormData(this);
+        $btn.prop('disabled', true);
+
+        $.ajax({
+            url: 'cirujano_crear.php',
+            method: 'POST',
+            data: formData,
+            processData: false,
+            contentType: false,
+            dataType: 'json'
+        })
+        .done(function(resp) {
+            if (resp.ok) {
+                $ok.removeClass('d-none').text(resp.msg || 'Creado.');
+                const newId = resp.id;
+                const newText = resp.nombre;
+
+                if ($('#cirujano_id option[value="'+newId+'"]').length === 0) {
+                    const newOption = new Option(newText, newId, true, true);
+                    $('#cirujano_id').append(newOption).trigger('change');
+                } else {
+                    $('#cirujano_id').val(newId).trigger('change');
+                }
+
+                setTimeout(function(){
+                    const modalEl = document.getElementById('modalNuevoCirujano');
+                    const modal = bootstrap.Modal.getInstance(modalEl);
+                    modal.hide();
+                    $('#formNuevoCirujano')[0].reset();
+                    $ok.addClass('d-none').text('');
+                }, 700);
+            } else {
+                $err.removeClass('d-none').text(resp.msg || 'No se pudo crear.');
+            }
+        })
+        .fail(function(xhr) {
+            const msg = xhr.responseText || 'Error de red/servidor';
+            $err.removeClass('d-none').text(msg);
+        })
+        .always(function() {
+            $btn.prop('disabled', false);
+        });
+    });
+
+    // Al abrir modal: limpiar
+    $('#modalNuevoCirujano').on('shown.bs.modal', function () {
+        $('#formNuevoCirujano')[0].reset();
+        $('#errorNuevoCirujano').addClass('d-none').text('');
+        $('#okNuevoCirujano').addClass('d-none').text('');
+        $(this).find('input[name="nombre"]').trigger('focus');
+    });
+});
+</script>
+</body>
+</html>

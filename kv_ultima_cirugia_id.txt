@@ -1,0 +1,75 @@
+<?php
+session_start();
+header('Content-Type: text/html; charset=utf-8'); // Asegura que la salida se codifique en UTF-8
+
+if (isset($_SESSION['usuario'])) {
+    if ($_SESSION['role'] === 'viewer') {
+        header("Location: ver_programacion.php");
+        exit;
+    }
+    header("Location: index.php");
+    exit;
+}
+
+$mensaje = '';
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $host = 'localhost';
+    $dbname = 'sitiosnuevos_hospital';
+    $username = 'sitiosnuevos_cirtugia';
+    $password = 'Realmedic2020';
+
+    $pdo = new PDO("mysql:host=$host;dbname=$dbname;charset=utf8", $username, $password);
+    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+
+    $user = $_POST['username'];
+    $pass = $_POST['password'];
+
+    $stmt = $pdo->prepare("SELECT * FROM usuarios WHERE username = :username");
+    $stmt->bindParam(':username', $user);
+    $stmt->execute();
+    $usuario = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    if ($usuario && password_verify($pass, $usuario['password'])) {
+        $_SESSION['usuario'] = $usuario['username'];
+        $_SESSION['role'] = $usuario['role'];
+
+        if ($usuario['role'] === 'viewer') {
+            header("Location: ver_programacion.php");
+            exit;
+        }
+
+        header("Location: index.php");
+        exit;
+    } else {
+        $mensaje = "Usuario o contraseña incorrectos.";
+    }
+}
+?>
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Inicio de sesión</title>
+    <link href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body>
+    <div class="container mt-5">
+        <h2 class="text-center">Inicio de sesión</h2>
+        <form method="POST" action="">
+            <div class="form-group">
+                <label for="username">Usuario</label>
+                <input type="text" class="form-control" id="username" name="username" required>
+            </div>
+            <div class="form-group">
+                <label for="password">Contraseña</label>
+                <input type="password" class="form-control" id="password" name="password" required>
+            </div>
+            <?php if ($mensaje): ?>
+                <div class="alert alert-danger"><?php echo $mensaje; ?></div>
+            <?php endif; ?>
+            <button type="submit" class="btn btn-primary btn-block">Ingresar</button>
+        </form>
+    </div>
+</body>
+</html>
