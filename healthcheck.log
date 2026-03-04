@@ -1,0 +1,161 @@
+<?php
+// /public_html/evoprx/programacion/ajax_ingresados.php
+declare(strict_types=1);
+
+require_once __DIR__ . '/../auth.php';
+require_login();
+require_once __DIR__ . '/../helpers.php';
+
+header('Content-Type: application/json; charset=utf-8');
+
+function hasColumn(PDO $pdo, string $table, string $column): bool {
+  $sql = "SELECT COUNT(*)
+          FROM INFORMATION_SCHEMA.COLUMNS
+          WHERE TABLE_SCHEMA = DATABASE()
+            AND TABLE_NAME = ?
+            AND COLUMN_NAME = ?";
+  $st = $pdo->prepare($sql);
+  $st->execute([$table, $column]);
+  return (int)$st->fetchColumn() > 0;
+}
+
+function cleanLike(string $s): string {
+  $s = trim($s);
+  $s = preg_replace('/\s+/', ' ', $s);
+  return $s;
+}
+
+try {
+  // PDO (soporta $pdo global o getPDO()/pdo())
+  if (!isset($pdo) || !($pdo instanceof PDO)) {
+    if (function_exists('getPDO')) $pdo = getPDO();
+    elseif (function_exists('pdo')) $pdo = pdo();
+    else throw new Exception("No hay PDO disponible.");
+  }
+
+  $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+  try { $pdo->exec("SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci"); } catch (Throwable $e) {}
+
+  $q = cleanLike((string)($_GET['q'] ?? ''));
+  $limit = (int)($_GET['limit'] ?? 80);
+  if ($limit <= 0 || $limit > 200) $limit = 80;
+
+  $T_ING = 'hosp_ingresos';
+  $T_HAB = 'hosp_habitaciones';
+
+  // Columnas opcionales (según tu BD real)
+  $has_nombre1   = hasColumn($pdo, $T_ING, 'nombre1');
+  $has_nombre2   = hasColumn($pdo, $T_ING, 'nombre2');
+  $has_apellido1 = hasColumn($pdo, $T_ING, 'apellido1');
+  $has_apellido2 = hasColumn($pdo, $T_ING, 'apellido2');
+  $has_cedula    = hasColumn($pdo, $T_ING, 'cedula');
+  $has_paciente  = hasColumn($pdo, $T_ING, 'paciente');     // algunos esquemas la tienen
+  $has_edad      = hasColumn($pdo, $T_ING, 'edad');         // <- en tu caso NO existe, por eso fallaba
+  $has_hab_id    = hasColumn($pdo, $T_ING, 'habitacion_id');
+  $has_fecha     = hasColumn($pdo, $T_ING, 'fecha_entrada');
+  $has_estado    = hasColumn($pdo, $T_ING, 'estado');
+  $has_cirujano  = hasColumn($pdo, $T_ING, 'cirujano_id');
+
+  // Select dinámico
+  $select = ["i.id"];
+
+  if ($has_nombre1)   $select[] = "i.nombre1";
+  if ($has_nombre2)   $select[] = "i.nombre2";
+  if ($has_apellido1) $select[] = "i.apellido1";
+  if ($has_apellido2) $select[] = "i.apellido2";
+  if ($has_cedula)    $select[] = "i.cedula";
+  if ($has_paciente)  $select[] = "i.paciente";
+  if ($has_edad)      $select[] = "i.edad";
+  if ($has_fecha)     $select[] = "i.fecha_entrada";
+  if ($has_hab_id)    $select[] = "i.habitacion_id";
+  if ($has_cirujano)  $select[] = "i.cirujano_id";
+
+  // Habitaciones (si existe FK)
+  $joinHab = "";
+  if ($has_hab_id) {
+    $joinHab = "LEFT JOIN {$T_HAB} h ON i.habitacion_id = h.id";
+    $select[] = "h.numero AS habitacion_numero";
+    $select[] = "h.descripcion AS habitacion_desc";
+  }
+
+  // WHERE: ingresados (estado null o ingresado)
+  $where = [];
+  if ($has_estado) {
+    $where[] = "(i.estado IS NULL OR i.estado = 'ingresado')";
+  } else {
+    // Si tu tabla no tiene estado, igual devolvemos todo
+    $where[] = "1=1";
+  }
+
+  $params = [];
+  if ($q !== '') {
+    $like = '%' . $q . '%';
+
+    $or = [];
+    $or[] = "CAST(i.id AS CHAR) LIKE ?";
+    $params[] = $like;
+
+    if ($has_cedula) { $or[] = "i.cedula LIKE ?"; $params[] = $like; }
+
+    // búsqueda por nombre: armamos un concat si hay columnas
+    $nameParts = [];
+    if ($has_nombre1)   $nameParts[] = "i.nombre1";
+    if ($has_nombre2)   $nameParts[] = "i.nombre2";
+    if ($has_apellido1) $nameParts[] = "i.apellido1";
+    if ($has_apellido2) $nameParts[] = "i.apellido2";
+
+    if (!empty($nameParts)) {
+      $or[] = "CONCAT_WS(' ', " . implode(',', $nameParts) . ") LIKE ?";
+      $params[] = $like;
+    }
+
+    if ($has_paciente) { $or[] = "i.paciente LIKE ?"; $params[] = $like; }
+
+    $where[] = "(" . implode(" OR ", $or) . ")";
+  }
+
+  $sql = "
+    SELECT " . implode(", ", $select) . "
+    FROM {$T_ING} i
+    {$joinHab}
+    WHERE " . implode(" AND ", $where) . "
+    ORDER BY " . ($has_fecha ? "i.fecha_entrada" : "i.id") . " DESC
+    LIMIT {$limit}
+  ";
+
+  $st = $pdo->prepare($sql);
+  $st->execute($params);
+  $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+
+  // Armar full_name consistente para tu modal
+  $out = [];
+  foreach ($rows as $r) {
+    $n1 = trim((string)($r['nombre1'] ?? ''));
+    $n2 = trim((string)($r['nombre2'] ?? ''));
+    $a1 = trim((string)($r['apellido1'] ?? ''));
+    $a2 = trim((string)($r['apellido2'] ?? ''));
+
+    $full = trim(preg_replace('/\s+/', ' ', trim($n1 . ' ' . $n2 . ' ' . $a1 . ' ' . $a2)));
+    if ($full === '') $full = trim((string)($r['paciente'] ?? 'POR ENVIAR'));
+    if ($full === '') $full = 'POR ENVIAR';
+
+    $r['full_name'] = $full;
+
+    // si no existe edad en tabla, aseguramos null para evitar bugs en JS
+    if (!array_key_exists('edad', $r)) $r['edad'] = null;
+
+    $out[] = $r;
+  }
+
+  echo json_encode(['ok' => true, 'data' => $out], JSON_UNESCAPED_UNICODE);
+  exit;
+
+} catch (Throwable $e) {
+  http_response_code(500);
+  echo json_encode([
+    'ok' => false,
+    'msg' => 'Error cargando ingresados',
+    'error' => $e->getMessage(),
+  ], JSON_UNESCAPED_UNICODE);
+  exit;
+}

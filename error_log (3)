@@ -1,0 +1,38 @@
+<?php
+// /public_html/evoprx/programacion/index.php
+
+require_once __DIR__ . '/../auth.php';
+require_login();
+require_once __DIR__ . '/../helpers.php';
+
+$BASE = $GLOBALS['BASE_URL'] ?? '';
+$u = current_user();
+$rol = (string)($u['rol'] ?? 'viewer');
+
+include __DIR__ . '/header.php';
+?>
+
+<!-- Contenido principal -->
+<div class="container mt-4">
+    <h1 class="mb-3">Bienvenido a la Gestión de Programación de Quirófanos</h1>
+    <p class="text-muted">Elige una opción:</p>
+
+    <div class="d-flex flex-wrap gap-3 mt-4">
+
+        <?php if ($rol !== 'viewer'): ?>
+            <a href="programar.php" class="btn btn-primary">
+                🗓️ Programar Cirugía
+            </a>
+
+            <?php if ($rol === 'admin'): ?>
+                <a href="crear_usuario.php" class="btn btn-secondary">
+                    👤 Crear Usuario
+                </a>
+            <?php endif; ?>
+        <?php endif; ?>
+
+        <a href="ver_programacion.php" class="btn btn-outline-dark">
+            📋 Ver o Modificar Cirugías Programadas
+        </a>
+    </div>
+</div>

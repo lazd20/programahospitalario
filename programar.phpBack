@@ -1,0 +1,105 @@
+<?php
+// /public_html/evoprx/programacion/eliminar_cirugia.php
+
+require_once __DIR__ . '/../auth.php';
+require_login();
+require_once __DIR__ . '/../helpers.php';
+
+date_default_timezone_set('America/Guayaquil');
+
+// =========================
+// Rol (nuevo esquema: role/rol + current_user)
+// =========================
+$u = function_exists('current_user') ? current_user() : null;
+$role = (string)($_SESSION['role'] ?? ($_SESSION['rol'] ?? ($u['rol'] ?? ($u['role'] ?? ''))));
+
+// Permitir admin/editor
+if (!in_array($role, ['admin', 'editor'], true)) {
+    $to = function_exists('base_url') ? base_url('/programacion/ver_programacion.php') : 'ver_programacion.php';
+    echo "<script>alert('No tienes permiso para realizar esta acción.'); window.location.href='" . addslashes($to) . "';</script>";
+    exit;
+}
+
+// =========================
+// PDO (usar el del auth.php; fallback a getPDO si existiera)
+// =========================
+if (isset($pdo) && $pdo instanceof PDO) {
+    // ok
+} elseif (function_exists('getPDO')) {
+    $pdo = getPDO();
+} else {
+    die("No hay conexión PDO disponible (revisa auth.php).");
+}
+
+$pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+$pdo->exec("SET NAMES utf8mb4");
+
+// =========================
+// Tablas (prefijo hosp_)
+// =========================
+$tProg = 'hosp_programacion_quirofano';
+
+// Si tu tabla de eliminadas NO tiene prefijo, cambia a: 'registro_cirugias_eliminadas'
+$tElim = 'hosp_registro_cirugias_eliminadas';
+
+$id = isset($_GET['id']) ? (int)$_GET['id'] : 0;
+if ($id <= 0) {
+    $to = function_exists('base_url') ? base_url('/programacion/ver_programacion.php') : 'ver_programacion.php';
+    echo "<script>alert('ID de cirugía no válido.'); window.location.href='" . addslashes($to) . "';</script>";
+    exit;
+}
+
+try {
+    $pdo->beginTransaction();
+
+    // 1) Copiar a eliminadas (desde programación)
+    // Nota: esto asume que $tElim tiene estas columnas.
+    // Si tu tabla eliminadas tiene columnas extra (ej: usuario_elimino, fecha_eliminacion),
+    // dime los nombres exactos y lo ajusto.
+    $sqlInsert = "
+        INSERT INTO {$tElim} (
+            id_original, dia, fecha, paciente, edad, h_ingreso, h_cirugia,
+            procedimiento, Q1, Q2, cirujano_id, anestesiologo, habitacion,
+            casa_comercial, mesa_traccion, laboratorio, arco_en_c
+        )
+        SELECT
+            pq.id, pq.dia, pq.fecha, pq.paciente, pq.edad, pq.h_ingreso, pq.h_cirugia,
+            pq.procedimiento, pq.Q1, pq.Q2, pq.cirujano_id, pq.anestesiologo, pq.habitacion,
+            pq.casa_comercial, pq.mesa_traccion, pq.laboratorio, pq.arco_en_c
+        FROM {$tProg} pq
+        WHERE pq.id = :id
+        LIMIT 1
+    ";
+    $stmtInsert = $pdo->prepare($sqlInsert);
+    $stmtInsert->bindValue(':id', $id, PDO::PARAM_INT);
+    $stmtInsert->execute();
+
+    if ($stmtInsert->rowCount() <= 0) {
+        $pdo->rollBack();
+        $to = function_exists('base_url') ? base_url('/programacion/ver_programacion.php') : 'ver_programacion.php';
+        echo "<script>alert('No existe la cirugía o ya fue eliminada.'); window.location.href='" . addslashes($to) . "';</script>";
+        exit;
+    }
+
+    // 2) Eliminar de programación
+    $sqlDelete = "DELETE FROM {$tProg} WHERE id = :id LIMIT 1";
+    $stmtDelete = $pdo->prepare($sqlDelete);
+    $stmtDelete->bindValue(':id', $id, PDO::PARAM_INT);
+    $stmtDelete->execute();
+
+    $pdo->commit();
+
+    $to = function_exists('base_url')
+        ? base_url('/programacion/ver_programacion.php?mensaje=' . urlencode('Cirugía eliminada con éxito'))
+        : ('ver_programacion.php?mensaje=' . urlencode('Cirugía eliminada con éxito'));
+
+    header("Location: {$to}");
+    exit;
+
+} catch (Throwable $e) {
+    if ($pdo->inTransaction()) $pdo->rollBack();
+
+    $to = function_exists('base_url') ? base_url('/programacion/ver_programacion.php') : 'ver_programacion.php';
+    echo "<script>alert('Error al eliminar: " . addslashes($e->getMessage()) . "'); window.location.href='" . addslashes($to) . "';</script>";
+    exit;
+}

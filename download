@@ -1,0 +1,187 @@
+<?php
+// /public_html/evoprx/programacion/cirugias_eliminadas.php
+
+require_once __DIR__ . '/../auth.php';
+require_login();
+require_once __DIR__ . '/../helpers.php';
+
+$BASE = $GLOBALS['BASE_URL'] ?? '';
+$u = current_user();
+
+$cirugias = [];
+$db_error = null;
+
+try {
+    // 1) Intento A: tabla eliminadas con prefijo + cirujanos con prefijo
+    $sqlA = "
+        SELECT re.*, c.nombre AS nombre_cirujano
+        FROM hosp_registro_cirugias_eliminadas re
+        LEFT JOIN hosp_cirujanos c ON re.cirujano_id = c.id
+        ORDER BY re.fecha DESC, re.h_cirugia ASC
+    ";
+    $stmt = $pdo->query($sqlA);
+    $cirugias = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+} catch (Throwable $eA) {
+    try {
+        // 2) Intento B: tabla eliminadas con prefijo + cirujanos SIN prefijo
+        $sqlB = "
+            SELECT re.*, c.nombre AS nombre_cirujano
+            FROM hosp_registro_cirugias_eliminadas re
+            LEFT JOIN cirujanos c ON re.cirujano_id = c.id
+            ORDER BY re.fecha DESC, re.h_cirugia ASC
+        ";
+        $stmt = $pdo->query($sqlB);
+        $cirugias = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    } catch (Throwable $eB) {
+        // Si llega aquí: o no existe hosp_registro_cirugias_eliminadas o hay columnas distintas
+        $db_error = "Error al consultar cirugías eliminadas. Revisa que exista la tabla hosp_registro_cirugias_eliminadas y la tabla de cirujanos.";
+        $cirugias = [];
+    }
+}
+
+// Array para días en español
+$diasSemana = [
+    'Monday'    => 'Lunes',
+    'Tuesday'   => 'Martes',
+    'Wednesday' => 'Miércoles',
+    'Thursday'  => 'Jueves',
+    'Friday'    => 'Viernes',
+    'Saturday'  => 'Sábado',
+    'Sunday'    => 'Domingo'
+];
+?>
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Cirugías Eliminadas</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    <link href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
+
+    <style>
+        .fecha-header {
+            background-color: #ffe4b5;
+            font-weight: bold;
+            text-align: center;
+            font-size: 1.2em;
+        }
+        .table { border: 2px solid #000; }
+        .table th, .table td {
+            border: 2px solid #000;
+            font-weight: bold;
+            font-size: 1.05em;
+        }
+        th { background-color: #343a40; color: #fff; }
+        .protesis { color: red; }
+        .details { display: none; }
+    </style>
+
+    <script>
+        function toggleDetails(button) {
+            const detailsRow = button.closest("tr").nextElementSibling;
+            const isHidden = (detailsRow.style.display === 'none' || detailsRow.style.display === '');
+            detailsRow.style.display = isHidden ? 'table-row' : 'none';
+            button.textContent = isHidden ? 'Ocultar' : 'Detalles';
+        }
+    </script>
+</head>
+<body>
+<div class="container-fluid mt-4">
+    <h2 class="text-center mb-4">Cirugías Eliminadas</h2>
+    <a href="ver_programacion.php" class="btn btn-secondary mb-3">← Volver a Programaciones</a>
+
+    <?php if (!empty($db_error)): ?>
+        <div class="alert alert-danger"><?= e($db_error) ?></div>
+    <?php endif; ?>
+
+    <table class="table table-striped table-bordered">
+        <thead class="thead-dark">
+        <tr>
+            <th>Paciente</th>
+            <th>Edad</th>
+            <th>Ingreso</th>
+            <th>Cirugía</th>
+            <th>Procedimiento</th>
+            <th>Q1</th>
+            <th>Q2</th>
+            <th>Cirujano</th>
+            <th>Anestesiólogo</th>
+            <th>Habitación</th>
+            <th>CC</th>
+            <th>MT</th>
+            <th>Laboratorio</th>
+            <th>AC</th>
+            <th>Acción</th>
+        </tr>
+        </thead>
+        <tbody>
+        <?php
+        $fechaActual = null;
+
+        if (empty($cirugias)) {
+            echo "<tr><td colspan='15' class='text-center text-muted py-4'>No hay registros.</td></tr>";
+        } else {
+            foreach ($cirugias as $row) {
+                $isProtesis = ((int)($row['es_protesis'] ?? 0) === 1) ? 'protesis' : '';
+                $fechaCirugia = (string)($row['fecha'] ?? '');
+
+                $hIngreso = !empty($row['h_ingreso']) ? date('H:i', strtotime($row['h_ingreso'])) : '';
+                $hCirugia = !empty($row['h_cirugia']) ? date('H:i', strtotime($row['h_cirugia'])) : '';
+
+                if ($fechaActual !== $fechaCirugia) {
+                    $fechaActual = $fechaCirugia;
+                    $diaEng = date('l', strtotime($fechaCirugia));
+                    $dia = $diasSemana[$diaEng] ?? $diaEng;
+
+                    echo "<tr>
+                            <td colspan='15' class='fecha-header'>
+                                Fecha: " . e(date('d-m-Y', strtotime($fechaCirugia))) . " - " . e($dia) . "
+                            </td>
+                          </tr>";
+                }
+
+                $laboratorio = nl2br(htmlspecialchars((string)($row['laboratorio'] ?? ''), ENT_QUOTES, 'UTF-8'));
+
+                echo "<tr class='{$isProtesis}'>
+                        <td>" . e($row['paciente'] ?? '') . "</td>
+                        <td>" . e($row['edad'] ?? '') . "</td>
+                        <td>" . e($hIngreso) . "</td>
+                        <td>" . e($hCirugia) . "</td>
+                        <td>" . e($row['procedimiento'] ?? '') . "</td>
+                        <td>" . (($row['Q1'] ?? '') === 'X' ? 'X' : '') . "</td>
+                        <td>" . (($row['Q2'] ?? '') === 'X' ? 'X' : '') . "</td>
+                        <td>" . e($row['nombre_cirujano'] ?? '') . "</td>
+                        <td>" . e($row['anestesiologo'] ?? '') . "</td>
+                        <td>" . e($row['habitacion'] ?? '') . "</td>
+                        <td>" . e($row['casa_comercial'] ?? '') . "</td>
+                        <td>" . e($row['mesa_traccion'] ?? '') . "</td>
+                        <td>{$laboratorio}</td>
+                        <td>" . e($row['arco_en_c'] ?? '') . "</td>
+                        <td>
+                            <a href='reagendar_cirugia.php?id=" . (int)($row['id'] ?? 0) . "' class='btn btn-warning btn-sm'>
+                                Modificar
+                            </a>
+                        </td>
+                      </tr>
+
+                      <tr class='details' style='display:none;'>
+                        <td colspan='15'>
+                            <strong>Detalles Adicionales:</strong><br>
+                            <strong>Habitación:</strong> " . e($row['habitacion'] ?? '') . "<br>
+                            <strong>CC:</strong> " . e($row['casa_comercial'] ?? '') . "<br>
+                            <strong>MT:</strong> " . e($row['mesa_traccion'] ?? '') . "<br>
+                            <strong>Laboratorio:</strong> {$laboratorio}<br>
+                            <strong>AC:</strong> " . e($row['arco_en_c'] ?? '') . "
+                        </td>
+                      </tr>";
+            }
+        }
+        ?>
+        </tbody>
+    </table>
+</div>
+</body>
+</html>

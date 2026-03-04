@@ -1,0 +1,1123 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Dashboard | Análisis de Cirugías</title>
+
+  <!-- Bootstrap 5 (CDN) -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <!-- Bootstrap Icons -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+  <style>
+    :root{
+      --bg:#0b1220;
+      --panel:#0f172a;
+      --panel2:#111c34;
+      --text:#e5e7eb;
+      --muted:#94a3b8;
+      --accent:#3b82f6;
+      --border: rgba(255,255,255,.08);
+    }
+    body{
+      background: radial-gradient(1200px 600px at 20% 0%, rgba(59,130,246,.25), transparent 55%),
+                  radial-gradient(1000px 500px at 85% 10%, rgba(16,185,129,.18), transparent 55%),
+                  var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+    .app-shell{ display:flex; min-height:100vh; }
+    .sidebar{
+      width: 280px;
+      background: rgba(15, 23, 42, .72);
+      backdrop-filter: blur(10px);
+      border-right: 1px solid var(--border);
+      position: sticky;
+      top:0;
+      height: 100vh;
+      padding: 18px;
+    }
+    .brand{ display:flex; align-items:center; gap:10px; margin-bottom: 16px; }
+    .brand .logo{
+      width: 38px; height: 38px; border-radius: 12px;
+      background: linear-gradient(135deg, rgba(59,130,246,.9), rgba(16,185,129,.7));
+      display:flex; align-items:center; justify-content:center;
+      box-shadow: 0 10px 30px rgba(0,0,0,.35);
+    }
+    .brand h1{ font-size: 16px; margin:0; font-weight: 700; letter-spacing:.2px; }
+    .brand p{margin:0;color:var(--muted);font-size:12px;}
+    .nav-pill{ display:flex; flex-direction:column; gap:8px; margin-top: 10px; }
+    .nav-pill button{
+      text-align:left; padding: 10px 12px; border-radius: 12px;
+      border: 1px solid transparent; background: transparent; color: var(--text);
+      display:flex; align-items:center; gap:10px;
+    }
+    .nav-pill button:hover{ background: rgba(255,255,255,.06); border-color: var(--border); }
+    .nav-pill button.active{ background: rgba(59,130,246,.18); border-color: rgba(59,130,246,.35); }
+    .content{ flex:1; padding: 18px 18px 28px; }
+    .panel{
+      background: rgba(15, 23, 42, .72);
+      backdrop-filter: blur(10px);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      box-shadow: 0 14px 40px rgba(0,0,0,.25);
+    }
+    .panel-header{
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--border);
+      display:flex; align-items:center; justify-content:space-between; gap:10px;
+    }
+    .panel-body{ padding: 16px; }
+    .kpi{
+      border-radius: 16px;
+      border: 1px solid var(--border);
+      background: rgba(17, 28, 52, .65);
+      padding: 14px 14px;
+      height:100%;
+    }
+    .kpi .label{ color: var(--muted); font-size: 12px; margin-bottom: 6px; display:flex; align-items:center; gap:8px; }
+    .kpi .value{ font-size: 22px; font-weight: 800; letter-spacing:.3px; }
+    .kpi .sub{ color: var(--muted); font-size: 12px; margin-top: 2px; }
+    .chip{
+      display:inline-flex; align-items:center; gap:8px;
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,.04);
+      padding: 8px 10px;
+      border-radius: 999px;
+      color: var(--text);
+      font-size: 12px;
+    }
+    .form-control, .form-select{
+      background-color: rgba(255,255,255,.04);
+      border: 1px solid var(--border);
+      color: var(--text);
+    }
+    .form-control:focus, .form-select:focus{
+      box-shadow: 0 0 0 .2rem rgba(59,130,246,.25);
+      border-color: rgba(59,130,246,.5);
+      background-color: rgba(255,255,255,.06);
+      color: var(--text);
+    }
+    .table{
+      --bs-table-bg: transparent;
+      --bs-table-color: var(--text);
+      border-color: var(--border);
+    }
+    .table thead th{
+      color: var(--muted);
+      font-weight: 600;
+      border-color: var(--border);
+    }
+    .table td, .table th{ border-color: var(--border); }
+    .badge-soft{
+      background: rgba(59,130,246,.18);
+      border: 1px solid rgba(59,130,246,.35);
+      color: #dbeafe;
+      font-weight: 600;
+    }
+    .btn-accent{
+      background: rgba(59,130,246,.9);
+      border-color: rgba(59,130,246,.95);
+      color: white;
+      font-weight: 700;
+      border-radius: 12px;
+    }
+    .btn-accent:hover{ filter: brightness(1.06); }
+    .btn-outline-light{ border-color: var(--border); }
+    canvas{ max-height: 360px; }
+    .small-muted{ color: var(--muted); font-size: 12px; }
+
+    /* ===== Responsive layout ===== */
+    @media (max-width: 991.98px){
+      .app-shell{ flex-direction: column; }
+
+      .sidebar{
+        width: 100%;
+        height: auto;
+        position: relative; /* deja de ser sticky en móvil */
+        top: auto;
+        border-right: 0;
+        border-bottom: 1px solid var(--border);
+        padding: 14px;
+      }
+      .content{ padding: 14px; }
+
+      /* Navegación en fila, scrolleable si no cabe */
+      .nav-pill{
+        flex-direction: row;
+        gap: 8px;
+        overflow-x: auto;
+        padding-bottom: 6px;
+      }
+      .nav-pill button{
+        white-space: nowrap;
+        flex: 0 0 auto;
+      }
+
+      /* Botones del top bar a full width */
+      .content .btn{ width: 100%; }
+
+      .sidebar .chip{
+        width: fit-content;
+        max-width: 100%;
+      }
+    }
+
+    @media (max-width: 575.98px){
+      h2{ font-size: 20px; }
+      .kpi .value{ font-size: 20px; }
+      canvas{ max-height: 280px; }
+      .panel-header{ flex-wrap: wrap; }
+    }
+  </style>
+</head>
+
+<body>
+<div class="app-shell">
+
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="logo"><i class="bi bi-bar-chart-line-fill"></i></div>
+      <div>
+        <h1>Análisis de Cirugías</h1>
+        <p>Dashboard moderno</p>
+      </div>
+    </div>
+
+    <div class="d-flex flex-column gap-2">
+      <div class="chip"><i class="bi bi-info-circle"></i> Hosting compartido | CDN</div>
+      <div class="chip"><i class="bi bi-shield-check"></i> Datos desde analisis_backend.php</div>
+    </div>
+
+    <hr style="border-color: var(--border); opacity:1; margin: 16px 0;">
+
+    <div class="nav-pill">
+      <button id="nav-general" class="active" onclick="switchTab('general', this)">
+        <i class="bi bi-speedometer2"></i> General
+      </button>
+      <button id="nav-medicos" onclick="switchTab('medicos', this)">
+        <i class="bi bi-person-badge"></i> Médicos
+      </button>
+      <button id="nav-procedimientos" onclick="switchTab('procedimientos', this)">
+        <i class="bi bi-diagram-3"></i> Procedimientos
+      </button>
+      <button id="nav-comparador" onclick="switchTab('comparador', this)">
+        <i class="bi bi-arrow-left-right"></i> Comparador
+      </button>
+    </div>
+
+    <div class="mt-auto pt-3">
+      <div class="small-muted">Tip: usa Mes+Año o Rango de fechas.</div>
+    </div>
+  </aside>
+
+  <!-- CONTENT -->
+  <main class="content">
+
+    <!-- TOP BAR -->
+    <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+      <div>
+        <h2 class="m-0" style="font-weight:800; letter-spacing:.2px;">Dashboard</h2>
+        <div class="small-muted">Carga automática + comparación mes/año anterior + KPIs de médicos y procedimientos</div>
+      </div>
+
+      <div class="d-flex gap-2 flex-wrap">
+        <button class="btn btn-outline-light" onclick="resetUI()">
+          <i class="bi bi-arrow-counterclockwise"></i> Limpiar
+        </button>
+        <button class="btn btn-accent" onclick="runQuickOverview()">
+          <i class="bi bi-lightning-charge-fill"></i> Vista rápida
+        </button>
+      </div>
+    </div>
+
+    <!-- FILTERS PANEL -->
+    <section class="panel mb-3">
+      <div class="panel-header">
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+          <i class="bi bi-funnel"></i>
+          <strong>Filtros</strong>
+          <span class="small-muted">Selecciona un rango o mes+año</span>
+        </div>
+        <div id="filterHint" class="small-muted"></div>
+      </div>
+
+      <div class="panel-body">
+        <div class="row g-3">
+          <div class="col-12 col-lg-4">
+            <label class="form-label">Fecha inicio</label>
+            <input type="date" id="fecha_inicio" class="form-control">
+          </div>
+          <div class="col-12 col-lg-4">
+            <label class="form-label">Fecha fin</label>
+            <input type="date" id="fecha_fin" class="form-control">
+          </div>
+          <div class="col-12 col-lg-2">
+            <label class="form-label">Mes</label>
+            <select id="mes" class="form-select">
+              <option value="">Seleccionar...</option>
+              <option value="1">Enero</option><option value="2">Febrero</option><option value="3">Marzo</option>
+              <option value="4">Abril</option><option value="5">Mayo</option><option value="6">Junio</option>
+              <option value="7">Julio</option><option value="8">Agosto</option><option value="9">Septiembre</option>
+              <option value="10">Octubre</option><option value="11">Noviembre</option><option value="12">Diciembre</option>
+            </select>
+          </div>
+          <div class="col-12 col-lg-2">
+            <label class="form-label">Año</label>
+            <input type="number" id="anio" class="form-control" placeholder="2026">
+          </div>
+        </div>
+
+        <div class="d-flex flex-wrap gap-2 mt-3">
+          <button class="btn btn-accent" onclick="applyFilters()">
+            <i class="bi bi-play-fill"></i> Aplicar
+          </button>
+          <button class="btn btn-outline-light" onclick="prefillThisMonth()">
+            <i class="bi bi-calendar2-week"></i> Este mes
+          </button>
+          <button class="btn btn-outline-light" onclick="prefillThisYear()">
+            <i class="bi bi-calendar2"></i> Este año (global)
+          </button>
+
+          <div class="ms-auto d-flex gap-2 flex-wrap">
+            <input type="number" id="anio_global" class="form-control" style="max-width:160px; min-width:140px" placeholder="Año global">
+            <button class="btn btn-success" style="border-radius:12px" onclick="loadGlobalMonthChart()">
+              <i class="bi bi-graph-up"></i> Cirugías por Mes
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- KPI ROW -->
+    <section class="row g-3 mb-3">
+      <div class="col-12 col-lg-3">
+        <div class="kpi">
+          <div class="label"><i class="bi bi-hash"></i> Total del análisis</div>
+          <div class="value" id="kpiTotal">—</div>
+          <div class="sub" id="kpiTotalSub">Cargando...</div>
+        </div>
+      </div>
+      <div class="col-12 col-lg-3">
+        <div class="kpi">
+          <div class="label"><i class="bi bi-person-lines-fill"></i> # Médicos (mes)</div>
+          <div class="value" id="kpiDocs">—</div>
+          <div class="sub">Cargado automático</div>
+        </div>
+      </div>
+      <div class="col-12 col-lg-3">
+        <div class="kpi">
+          <div class="label"><i class="bi bi-diagram-3"></i> # Procedimientos</div>
+          <div class="value" id="kpiProcs">—</div>
+          <div class="sub">Cargado automático</div>
+        </div>
+      </div>
+      <div class="col-12 col-lg-3">
+        <div class="kpi">
+          <div class="label"><i class="bi bi-tags"></i> Categorías (auto)</div>
+          <div class="value" id="kpiCats">—</div>
+          <div class="sub">Si no existe backend → queda —</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- MAIN PANEL -->
+    <section class="panel">
+      <div class="panel-header">
+        <div class="d-flex align-items-center gap-2">
+          <i class="bi bi-layout-text-sidebar-reverse"></i>
+          <strong id="tabTitle">General</strong>
+        </div>
+        <div class="small-muted" id="tabHint">Gráficos y tablas rápidas</div>
+      </div>
+
+      <div class="panel-body">
+
+        <!-- GENERAL -->
+        <div id="tab-general">
+          <div class="row g-3">
+            <div class="col-12 col-xl-7">
+              <div class="panel" style="border-radius:16px;">
+                <div class="panel-header">
+                  <strong><i class="bi bi-bar-chart"></i> Gráfico</strong>
+                  <div class="small-muted" id="chartLabel">—</div>
+                </div>
+                <div class="panel-body">
+                  <canvas id="chartMain"></canvas>
+                </div>
+              </div>
+
+              <!-- COMPARACIÓN -->
+              <div class="panel mt-3" style="border-radius:16px;">
+                <div class="panel-header">
+                  <strong><i class="bi bi-bar-chart-steps"></i> Comparación: Mes actual vs mismo mes año anterior</strong>
+                  <div class="small-muted" id="compareLabel">—</div>
+                </div>
+                <div class="panel-body">
+                  <div class="row g-3 align-items-stretch">
+                    <div class="col-12 col-lg-4">
+                      <div class="kpi">
+                        <div class="label"><i class="bi bi-calendar2-week"></i> Total mes actual</div>
+                        <div class="value" id="kpiMesActual">—</div>
+                        <div class="sub" id="kpiMesActualSub">—</div>
+                      </div>
+                    </div>
+                    <div class="col-12 col-lg-4">
+                      <div class="kpi">
+                        <div class="label"><i class="bi bi-calendar2-week"></i> Total mismo mes (año anterior)</div>
+                        <div class="value" id="kpiMesAnterior">—</div>
+                        <div class="sub" id="kpiMesAnteriorSub">—</div>
+                      </div>
+                    </div>
+                    <div class="col-12 col-lg-4">
+                      <div class="kpi">
+                        <div class="label"><i class="bi bi-graph-up-arrow"></i> Variación</div>
+                        <div class="value" id="kpiVariacion">—</div>
+                        <div class="sub" id="kpiVariacionSub">—</div>
+                      </div>
+                    </div>
+                    <div class="col-12">
+                      <canvas id="chartCompare"></canvas>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+
+            <div class="col-12 col-xl-5">
+              <div class="panel" style="border-radius:16px;">
+                <div class="panel-header">
+                  <strong><i class="bi bi-grid-3x3-gap"></i> Accesos rápidos</strong>
+                </div>
+                <div class="panel-body d-grid gap-2">
+                  <button class="btn btn-outline-light" onclick="loadAnalysis('horarios')"><i class="bi bi-clock-history"></i> Horarios críticos</button>
+                  <button class="btn btn-outline-light" onclick="loadAnalysis('dias_movidos')"><i class="bi bi-calendar3"></i> Días más movidos</button>
+                  <button class="btn btn-outline-light" onclick="loadAnalysis('cirugias_diarias')"><i class="bi bi-calendar2-day"></i> Cirugías por día</button>
+                  <button class="btn btn-outline-light" onclick="loadAnalysis('cirugias_por_semana')"><i class="bi bi-calendar2-week"></i> Cirugías por semana</button>
+                </div>
+              </div>
+
+              <div class="panel mt-3" style="border-radius:16px;">
+                <div class="panel-header">
+                  <strong><i class="bi bi-table"></i> Tabla</strong>
+                  <div class="small-muted">Se llena según análisis</div>
+                </div>
+                <div class="panel-body">
+                  <div id="tableGeneral" class="table-responsive"></div>
+                </div>
+              </div>
+
+            </div>
+          </div>
+        </div>
+
+        <!-- MÉDICOS -->
+        <div id="tab-medicos" class="d-none">
+          <div class="row g-3">
+            <div class="col-12 col-xl-6">
+              <div class="panel" style="border-radius:16px;">
+                <div class="panel-header">
+                  <strong><i class="bi bi-trophy"></i> Ranking de médicos</strong>
+                  <div class="small-muted">Se carga automático (render al abrir tab)</div>
+                </div>
+                <div class="panel-body">
+                  <div class="d-flex gap-2 mb-2 flex-wrap">
+                    <button class="btn btn-accent" onclick="loadDoctors('top_cirujanos', true)">
+                      <i class="bi bi-award"></i> Top 5
+                    </button>
+                    <button class="btn btn-outline-light" onclick="loadDoctors('cirujanos_mes', true)">
+                      <i class="bi bi-pie-chart"></i> Distribución
+                    </button>
+                    <button class="btn btn-outline-light" onclick="loadDoctors('listado_cirujanos', true)">
+                      <i class="bi bi-list-ul"></i> Listado completo
+                    </button>
+                  </div>
+                  <canvas id="chartDoctors"></canvas>
+                </div>
+              </div>
+            </div>
+
+            <div class="col-12 col-xl-6">
+              <div class="panel" style="border-radius:16px;">
+                <div class="panel-header">
+                  <strong><i class="bi bi-table"></i> Tabla de médicos</strong>
+                  <div class="small-muted">Lista completa</div>
+                </div>
+                <div class="panel-body">
+                  <div id="tableDoctors" class="table-responsive"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- PROCEDIMIENTOS -->
+        <div id="tab-procedimientos" class="d-none">
+          <div class="row g-3">
+            <div class="col-12 col-xl-6">
+              <div class="panel" style="border-radius:16px;">
+                <div class="panel-header">
+                  <strong><i class="bi bi-diagram-3"></i> Procedimientos</strong>
+                  <div class="small-muted">Se carga automático (render al abrir tab)</div>
+                </div>
+                <div class="panel-body">
+                  <div class="d-flex gap-2 mb-2 flex-wrap">
+                    <button class="btn btn-outline-light" onclick="loadProceduresRaw(true)">
+                      <i class="bi bi-list-check"></i> Ver listado
+                    </button>
+                    <button class="btn btn-accent" onclick="loadProcedureCategories(true)">
+                      <i class="bi bi-tags-fill"></i> Categorías
+                    </button>
+                  </div>
+                  <canvas id="chartProcedures"></canvas>
+                </div>
+              </div>
+            </div>
+
+            <div class="col-12 col-xl-6">
+              <div class="panel" style="border-radius:16px;">
+                <div class="panel-header">
+                  <strong><i class="bi bi-table"></i> Ranking</strong>
+                  <div class="small-muted" id="procTableHint">—</div>
+                </div>
+                <div class="panel-body">
+                  <div id="tableProcedures" class="table-responsive"></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="col-12">
+              <div class="panel" style="border-radius:16px;">
+                <div class="panel-header">
+                  <strong><i class="bi bi-collection"></i> Subcategorías</strong>
+                  <div class="small-muted">Solo si existe ranking_subgrupos</div>
+                </div>
+                <div class="panel-body">
+                  <div id="tableSubcats" class="table-responsive"></div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- COMPARADOR -->
+        <div id="tab-comparador" class="d-none">
+          <div class="row g-3">
+            <div class="col-12 col-lg-6">
+              <div class="panel" style="border-radius:16px;">
+                <div class="panel-header">
+                  <strong><i class="bi bi-arrow-left-right"></i> Comparar cirujanos</strong>
+                </div>
+                <div class="panel-body">
+                  <div class="row g-2">
+                    <div class="col-6">
+                      <label class="form-label">Mes A</label>
+                      <select class="form-select" id="mes_a">
+                        <option value="">--</option>
+                        <option value="1">Enero</option><option value="2">Febrero</option><option value="3">Marzo</option>
+                        <option value="4">Abril</option><option value="5">Mayo</option><option value="6">Junio</option>
+                        <option value="7">Julio</option><option value="8">Agosto</option><option value="9">Septiembre</option>
+                        <option value="10">Octubre</option><option value="11">Noviembre</option><option value="12">Diciembre</option>
+                      </select>
+                    </div>
+                    <div class="col-6">
+                      <label class="form-label">Año A</label>
+                      <input type="number" class="form-control" id="anio_a" placeholder="2026">
+                    </div>
+                    <div class="col-6">
+                      <label class="form-label">Mes B</label>
+                      <select class="form-select" id="mes_b">
+                        <option value="">--</option>
+                        <option value="1">Enero</option><option value="2">Febrero</option><option value="3">Marzo</option>
+                        <option value="4">Abril</option><option value="5">Mayo</option><option value="6">Junio</option>
+                        <option value="7">Julio</option><option value="8">Agosto</option><option value="9">Septiembre</option>
+                        <option value="10">Octubre</option><option value="11">Noviembre</option><option value="12">Diciembre</option>
+                      </select>
+                    </div>
+                    <div class="col-6">
+                      <label class="form-label">Año B</label>
+                      <input type="number" class="form-control" id="anio_b" placeholder="2026">
+                    </div>
+                  </div>
+
+                  <button class="btn btn-accent w-100 mt-3" onclick="compareSurgeons()">
+                    <i class="bi bi-search"></i> Comparar
+                  </button>
+
+                  <div id="compareResult" class="mt-3"></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="col-12 col-lg-6">
+              <div class="panel" style="border-radius:16px;">
+                <div class="panel-header">
+                  <strong><i class="bi bi-lightbulb"></i> Nota</strong>
+                </div>
+                <div class="panel-body">
+                  <ul class="small-muted mb-0">
+                    <li>Comparación automática (año anterior) está en “General”.</li>
+                    <li>Este comparador muestra cambios de cirujanos entre 2 meses.</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<script>
+  // ===================== STATE =====================
+  let mainChart = null;
+  let doctorsChart = null;
+  let procChart = null;
+  let compareChart = null;
+
+  let lastFilters = null;
+
+  // caches para poder cargar en background y renderizar al abrir tab
+  let cacheDoctors = null;       // {tipo, labels, data, total}
+  let cacheProceduresRaw = null; // {labels, data, total}
+  let cacheCats = null;          // {ranking_especialidades, ranking_subgrupos}
+
+  // ===================== HELPERS =====================
+  function isVisible(el){
+    if(!el) return false;
+    return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+  }
+
+  function escapeHtml(str){
+    return String(str)
+      .replaceAll('&','&amp;')
+      .replaceAll('<','&lt;')
+      .replaceAll('>','&gt;')
+      .replaceAll('"','&quot;')
+      .replaceAll("'","&#039;");
+  }
+
+  function renderTable(containerId, headers, rows){
+    let html = `<table class="table table-sm table-hover align-middle">
+      <thead><tr>${headers.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>`;
+    rows.forEach(r=>{
+      html += `<tr>${r.map(c=>`<td>${c}</td>`).join('')}</tr>`;
+    });
+    html += `</tbody></table>`;
+    document.getElementById(containerId).innerHTML = html;
+  }
+
+  // ===================== NAV =====================
+  function switchTab(tab, btn){
+    document.querySelectorAll('.nav-pill button').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+
+    ['general','medicos','procedimientos','comparador'].forEach(t=>{
+      document.getElementById('tab-'+t).classList.add('d-none');
+    });
+    document.getElementById('tab-'+tab).classList.remove('d-none');
+
+    const titles = {
+      general: ['General','Gráficos y tablas rápidas'],
+      medicos: ['Médicos','Ranking, top y distribución'],
+      procedimientos: ['Procedimientos','Listado + categorías'],
+      comparador: ['Comparador','Cirujanos entre meses']
+    };
+    document.getElementById('tabTitle').innerText = titles[tab][0];
+    document.getElementById('tabHint').innerText = titles[tab][1];
+
+    // al abrir tab, si ya había cache, renderiza charts sin volver a pedir
+    if(tab === 'medicos' && cacheDoctors){
+      renderDoctorsFromCache(cacheDoctors);
+    }
+    if(tab === 'procedimientos'){
+      if(cacheProceduresRaw){
+        renderProceduresRawFromCache(cacheProceduresRaw);
+      }
+      // if(cacheCats){ renderCatsFromCache(cacheCats); }
+    }
+  }
+
+  // ===================== FILTERS =====================
+  function buildFilterHint(f){
+    if(!f) return 'Sin filtros';
+    if(f.fecha_inicio && f.fecha_fin) return `Rango: ${f.fecha_inicio} → ${f.fecha_fin}`;
+    if(f.mes && f.anio) return `Mes/Año: ${f.mes}/${f.anio}`;
+    return 'Sin filtros (define rango o mes/año)';
+  }
+
+  function applyFilters(){
+    const fecha_inicio = document.getElementById('fecha_inicio').value;
+    const fecha_fin = document.getElementById('fecha_fin').value;
+    const mes = document.getElementById('mes').value;
+    const anio = document.getElementById('anio').value;
+
+    lastFilters = {fecha_inicio, fecha_fin, mes, anio};
+    document.getElementById('filterHint').innerText = buildFilterHint(lastFilters);
+
+    // Carga general por defecto
+    loadAnalysis('cirugias_diarias').catch(console.error);
+
+    // Carga automática (background) médicos y procedimientos para el mes seleccionado
+    loadDoctors('listado_cirujanos', false).catch(console.error);
+    loadProceduresRaw(false).catch(console.error);
+
+    // Comparación mes actual vs año anterior
+    loadMonthComparison().catch(()=>{});
+  }
+
+  function prefillThisMonth(){
+    const d = new Date();
+    document.getElementById('mes').value = String(d.getMonth()+1);
+    document.getElementById('anio').value = String(d.getFullYear());
+    document.getElementById('fecha_inicio').value = '';
+    document.getElementById('fecha_fin').value = '';
+    applyFilters();
+  }
+
+  function prefillThisYear(){
+    const d = new Date();
+    document.getElementById('anio_global').value = String(d.getFullYear());
+    loadGlobalMonthChart().catch(console.error);
+  }
+
+  function resetUI(){
+    document.getElementById('fecha_inicio').value = '';
+    document.getElementById('fecha_fin').value = '';
+    document.getElementById('mes').value = '';
+    document.getElementById('anio').value = '';
+    lastFilters = null;
+
+    cacheDoctors = null;
+    cacheProceduresRaw = null;
+    cacheCats = null;
+
+    if(mainChart){ mainChart.destroy(); mainChart=null; }
+    if(doctorsChart){ doctorsChart.destroy(); doctorsChart=null; }
+    if(procChart){ procChart.destroy(); procChart=null; }
+    if(compareChart){ compareChart.destroy(); compareChart=null; }
+
+    document.getElementById('tableGeneral').innerHTML = '';
+    document.getElementById('tableDoctors').innerHTML = '';
+    document.getElementById('tableProcedures').innerHTML = '';
+    document.getElementById('tableSubcats').innerHTML = '';
+
+    document.getElementById('kpiTotal').innerText = '—';
+    document.getElementById('kpiDocs').innerText = '—';
+    document.getElementById('kpiProcs').innerText = '—';
+    document.getElementById('kpiCats').innerText = '—';
+    document.getElementById('kpiTotalSub').innerText = 'Aplica filtros para ver datos';
+    document.getElementById('filterHint').innerText = 'Filtros limpios';
+  }
+
+  function runQuickOverview(){
+    if(!lastFilters){
+      alert('Primero aplica filtros (rango o mes/año).');
+      return;
+    }
+    switchTab('medicos', document.getElementById('nav-medicos'));
+    loadDoctors('top_cirujanos', true).catch(console.error);
+
+    setTimeout(()=> {
+      switchTab('procedimientos', document.getElementById('nav-procedimientos'));
+      loadProceduresRaw(true).catch(console.error);
+    }, 500);
+  }
+
+  // ===================== URL / FETCH =====================
+  function buildUrl(tipo){
+    let url = `analisis_backend.php?tipo=${encodeURIComponent(tipo)}`;
+
+    if(tipo === 'cirugias_por_mes'){
+      const anio = document.getElementById('anio_global').value;
+      if(!anio){ throw new Error('Debe ingresar año global'); }
+      url += `&anio=${encodeURIComponent(anio)}`;
+      return url;
+    }
+
+    if(!lastFilters){
+      const fecha_inicio = document.getElementById('fecha_inicio').value;
+      const fecha_fin = document.getElementById('fecha_fin').value;
+      const mes = document.getElementById('mes').value;
+      const anio = document.getElementById('anio').value;
+      lastFilters = {fecha_inicio, fecha_fin, mes, anio};
+    }
+
+    const f = lastFilters;
+
+    if(f.fecha_inicio && f.fecha_fin){
+      url += `&fecha_inicio=${encodeURIComponent(f.fecha_inicio)}&fecha_fin=${encodeURIComponent(f.fecha_fin)}`;
+    } else if(f.mes && f.anio){
+      url += `&mes=${encodeURIComponent(f.mes)}&anio=${encodeURIComponent(f.anio)}`;
+    }
+
+    return url;
+  }
+
+  async function fetchJSON(url){
+    const res = await fetch(url);
+    const data = await res.json();
+    if(data && data.error) throw new Error(data.error);
+    return data;
+  }
+
+  // ===================== CHART HELPERS =====================
+  function renderBarChart(canvasId, labels, values, labelText, existingChartRef){
+    const canvas = document.getElementById(canvasId);
+    if(!canvas) return null;
+
+    const ctx = canvas.getContext('2d');
+    if(existingChartRef) existingChartRef.destroy();
+
+    return new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [{
+          label: labelText,
+          data: values,
+          borderWidth: 1
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: true } },
+        scales: { y: { beginAtZero: true } }
+      }
+    });
+  }
+
+  function renderLineChart(canvasId, labels, values, labelText, existingChartRef){
+    const canvas = document.getElementById(canvasId);
+    if(!canvas) return null;
+
+    const ctx = canvas.getContext('2d');
+    if(existingChartRef) existingChartRef.destroy();
+
+    return new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [{
+          label: labelText,
+          data: values,
+          borderWidth: 2,
+          tension: 0.35,
+          fill: false
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: { y: { beginAtZero: true } }
+      }
+    });
+  }
+
+  // ===================== GENERAL LOADERS =====================
+  async function loadAnalysis(tipo){
+    if(!lastFilters){
+      alert('Primero aplica filtros.');
+      return;
+    }
+
+    const url = buildUrl(tipo);
+    const data = await fetchJSON(url);
+
+    document.getElementById('kpiTotal').innerText = (data.total ?? '—');
+    document.getElementById('kpiTotalSub').innerText = buildFilterHint(lastFilters);
+    document.getElementById('chartLabel').innerText = tipo;
+
+    const isLine = (tipo === 'cirugias_por_mes');
+    if(isLine){
+      mainChart = renderLineChart('chartMain', data.labels || [], data.data || [], tipo, mainChart);
+    } else {
+      mainChart = renderBarChart('chartMain', data.labels || [], data.data || [], tipo, mainChart);
+    }
+
+    if(tipo === 'cirugias_diarias' && data.tabla){
+      const rows = data.tabla.map(x => [escapeHtml(x.dia), x.total]);
+      renderTable('tableGeneral', ['Fecha', 'Cantidad'], rows);
+    } else {
+      const rows = (data.labels || []).map((l,i)=> [escapeHtml(l), data.data[i]]);
+      renderTable('tableGeneral', ['Label', 'Cantidad'], rows);
+    }
+  }
+
+  async function loadGlobalMonthChart(){
+    const url = buildUrl('cirugias_por_mes');
+    const data = await fetchJSON(url);
+
+    switchTab('general', document.getElementById('nav-general'));
+
+    mainChart = renderLineChart('chartMain', data.labels || [], data.data || [], 'Cirugías por Mes', mainChart);
+
+    document.getElementById('chartLabel').innerText = `Global ${document.getElementById('anio_global').value}`;
+    document.getElementById('kpiTotal').innerText = (data.total ?? '—');
+    document.getElementById('kpiTotalSub').innerText = `Año global`;
+
+    const rows = (data.labels || []).map((l,i)=> [escapeHtml(l), data.data[i]]);
+    renderTable('tableGeneral', ['Mes', 'Cantidad'], rows);
+  }
+
+  // ===================== DOCTORS (CACHE + RENDER) =====================
+  function renderDoctorsFromCache(cache){
+    const rows = cache.labels.map((l,i)=> [
+      `<span class="badge badge-soft">${i+1}</span> ${escapeHtml(l)}`,
+      cache.data[i]
+    ]);
+    renderTable('tableDoctors', ['Médico', 'Cantidad'], rows);
+
+    const canvas = document.getElementById('chartDoctors');
+    if(canvas && isVisible(canvas)){
+      const topLabels = cache.labels.slice(0, 15);
+      const topValues = cache.data.slice(0, 15);
+      doctorsChart = renderBarChart('chartDoctors', topLabels, topValues, cache.tipo, doctorsChart);
+    }
+  }
+
+  async function loadDoctors(tipo, forceRender){
+    if(!lastFilters){
+      alert('Primero aplica filtros.');
+      return;
+    }
+    const url = buildUrl(tipo);
+    const data = await fetchJSON(url);
+
+    document.getElementById('kpiDocs').innerText = (data.labels?.length ?? '—');
+
+    cacheDoctors = { tipo, labels: data.labels || [], data: data.data || [], total: data.total || 0 };
+
+    renderDoctorsFromCache(cacheDoctors);
+
+    if(forceRender){
+      const canvas = document.getElementById('chartDoctors');
+      if(canvas && isVisible(canvas)){
+        renderDoctorsFromCache(cacheDoctors);
+      }
+    }
+  }
+
+  // ===================== PROCEDURES RAW (CACHE + RENDER) =====================
+  function renderProceduresRawFromCache(cache){
+    document.getElementById('procTableHint').innerText = 'Listado de procedimientos (texto)';
+    document.getElementById('tableSubcats').innerHTML = '';
+
+    const rows = cache.labels.map((l,i)=> [
+      `<span class="badge badge-soft">${i+1}</span> ${escapeHtml(l)}`,
+      cache.data[i]
+    ]);
+    renderTable('tableProcedures', ['Procedimiento', 'Cantidad'], rows);
+
+    const canvas = document.getElementById('chartProcedures');
+    if(canvas && isVisible(canvas)){
+      const topLabels = cache.labels.slice(0, 15);
+      const topValues = cache.data.slice(0, 15);
+      procChart = renderBarChart('chartProcedures', topLabels, topValues, 'Procedimientos (Top 15)', procChart);
+    }
+  }
+
+  async function loadProceduresRaw(forceRender){
+    if(!lastFilters){
+      alert('Primero aplica filtros.');
+      return;
+    }
+
+    const url = buildUrl('analisis_procedimientos');
+    const data = await fetchJSON(url);
+
+    document.getElementById('kpiProcs').innerText = (data.labels?.length ?? '—');
+
+    cacheProceduresRaw = { labels: data.labels || [], data: data.data || [], total: data.total || 0 };
+    renderProceduresRawFromCache(cacheProceduresRaw);
+
+    if(forceRender){
+      const canvas = document.getElementById('chartProcedures');
+      if(canvas && isVisible(canvas)){
+        renderProceduresRawFromCache(cacheProceduresRaw);
+      }
+    }
+  }
+
+  // ===================== CATEGORIES (OPTIONAL) =====================
+  function renderCatsFromCache(cache){
+    const esp = cache.ranking_especialidades || [];
+    const sub = cache.ranking_subgrupos || [];
+
+    document.getElementById('procTableHint').innerText = 'Ranking por categorías';
+    document.getElementById('kpiCats').innerText = esp.length ? String(esp.length) : '—';
+
+    const rowsCats = esp.map((x,i)=> [
+      `<span class="badge badge-soft">${i+1}</span> ${escapeHtml(x.especialidad)}`,
+      x.total
+    ]);
+    renderTable('tableProcedures', ['Categoría', 'Cantidad'], rowsCats);
+
+    const rowsSub = sub.slice(0, 30).map((x,i)=> [
+      `<span class="badge badge-soft">${i+1}</span> ${escapeHtml(x.especialidad)}`,
+      escapeHtml(x.subgrupo),
+      x.total
+    ]);
+    renderTable('tableSubcats', ['Especialidad', 'Subgrupo', 'Cantidad'], rowsSub);
+
+    const canvas = document.getElementById('chartProcedures');
+    if(canvas && isVisible(canvas)){
+      const labels = esp.map(x => x.especialidad);
+      const values = esp.map(x => x.total);
+      procChart = renderBarChart('chartProcedures', labels, values, 'Categorías', procChart);
+    }
+  }
+
+  async function loadProcedureCategories(forceRender){
+    if(!lastFilters){
+      alert('Primero aplica filtros.');
+      return;
+    }
+
+    const url = buildUrl('analisis_procedimientos_categorizados');
+    const data = await fetchJSON(url);
+
+    cacheCats = {
+      ranking_especialidades: data.ranking_especialidades || [],
+      ranking_subgrupos: data.ranking_subgrupos || []
+    };
+
+    renderCatsFromCache(cacheCats);
+
+    if(forceRender){
+      const canvas = document.getElementById('chartProcedures');
+      if(canvas && isVisible(canvas)){
+        renderCatsFromCache(cacheCats);
+      }
+    }
+  }
+
+  // ===================== COMPARADOR BACKEND =====================
+  async function compareSurgeons(){
+    const mesA = document.getElementById("mes_a").value;
+    const anioA = document.getElementById("anio_a").value;
+    const mesB = document.getElementById("mes_b").value;
+    const anioB = document.getElementById("anio_b").value;
+
+    if(!mesA || !anioA || !mesB || !anioB){
+      alert("Debes seleccionar ambos meses y años.");
+      return;
+    }
+
+    const url = `analisis_backend.php?tipo=comparar_cirujanos&mes_a=${encodeURIComponent(mesA)}&anio_a=${encodeURIComponent(anioA)}&mes_b=${encodeURIComponent(mesB)}&anio_b=${encodeURIComponent(anioB)}`;
+    const data = await fetchJSON(url);
+
+    const soloA = (data.solo_a || []).map(x=>`<div>• ${escapeHtml(x)}</div>`).join('') || '<div class="small-muted">Ninguno</div>';
+    const soloB = (data.solo_b || []).map(x=>`<div>• ${escapeHtml(x)}</div>`).join('') || '<div class="small-muted">Ninguno</div>';
+
+    document.getElementById("compareResult").innerHTML = `
+      <div class="panel mb-2" style="border-radius:14px;">
+        <div class="panel-header"><strong class="text-info"><i class="bi bi-dash-circle"></i> No operaron en el segundo mes</strong></div>
+        <div class="panel-body">${soloA}</div>
+      </div>
+      <div class="panel" style="border-radius:14px;">
+        <div class="panel-header"><strong class="text-warning"><i class="bi bi-plus-circle"></i> Nuevos en el segundo mes</strong></div>
+        <div class="panel-body">${soloB}</div>
+      </div>
+    `;
+  }
+
+  // ===================== AUTO COMPARISON (MONTH VS LAST YEAR) =====================
+  function monthName(m){
+    const names = ["","Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
+    return names[Number(m)] || `Mes ${m}`;
+  }
+
+  function formatDelta(current, prev){
+    const diff = current - prev;
+    if(prev <= 0) return { text: (diff>=0? `+${diff}` : `${diff}`), pct: '—' };
+    const pct = ((diff / prev) * 100);
+    return { text: (diff>=0? `+${diff}` : `${diff}`), pct: `${pct.toFixed(1)}%` };
+  }
+
+  function renderCompareChart(labels, values){
+    const canvas = document.getElementById('chartCompare');
+    if(!canvas) return;
+
+    const ctx = canvas.getContext('2d');
+    if(compareChart) compareChart.destroy();
+
+    compareChart = new Chart(ctx, {
+      type: 'bar',
+      data: { labels, datasets: [{ label: 'Total de cirugías', data: values, borderWidth: 1 }] },
+      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: true } }, scales: { y: { beginAtZero: true } } }
+    });
+  }
+
+  async function loadMonthComparison(){
+    const m = Number(lastFilters?.mes);
+    const y = Number(lastFilters?.anio);
+    if(!m || !y) return;
+
+    const yPrev = y - 1;
+
+    const urlCurrent = `analisis_backend.php?tipo=cirugias_diarias&mes=${encodeURIComponent(m)}&anio=${encodeURIComponent(y)}`;
+    const urlPrev    = `analisis_backend.php?tipo=cirugias_diarias&mes=${encodeURIComponent(m)}&anio=${encodeURIComponent(yPrev)}`;
+
+    const [cur, prev] = await Promise.all([fetchJSON(urlCurrent), fetchJSON(urlPrev)]);
+
+    const totalCur = Number(cur.total || 0);
+    const totalPrev = Number(prev.total || 0);
+
+    document.getElementById('kpiMesActual').innerText = totalCur;
+    document.getElementById('kpiMesAnterior').innerText = totalPrev;
+    document.getElementById('kpiMesActualSub').innerText = `${monthName(m)} ${y}`;
+    document.getElementById('kpiMesAnteriorSub').innerText = `${monthName(m)} ${yPrev}`;
+
+    const d = formatDelta(totalCur, totalPrev);
+    document.getElementById('kpiVariacion').innerText = d.text;
+    document.getElementById('kpiVariacionSub').innerText = (d.pct === '—') ? 'Sin base para %' : `Cambio: ${d.pct}`;
+    document.getElementById('compareLabel').innerText = `${monthName(m)} ${y} vs ${monthName(m)} ${yPrev}`;
+
+    renderCompareChart([`${monthName(m)} ${yPrev}`, `${monthName(m)} ${y}`], [totalPrev, totalCur]);
+  }
+
+  // ===================== AUTO LOAD ON OPEN =====================
+  window.addEventListener('DOMContentLoaded', () => {
+    const d = new Date();
+
+    document.getElementById('mes').value = String(d.getMonth() + 1);
+    document.getElementById('anio').value = String(d.getFullYear());
+    document.getElementById('anio_global').value = String(d.getFullYear());
+
+    lastFilters = { fecha_inicio:'', fecha_fin:'', mes:String(d.getMonth()+1), anio:String(d.getFullYear()) };
+    document.getElementById('filterHint').innerText = buildFilterHint(lastFilters);
+    document.getElementById('kpiTotalSub').innerText = buildFilterHint(lastFilters);
+
+    loadAnalysis('cirugias_diarias').catch(console.error);
+    loadDoctors('listado_cirujanos', false).catch(console.error);
+    loadProceduresRaw(false).catch(console.error);
+    loadMonthComparison().catch(()=>{});
+  });
+
+  // ===== resize helper para charts (móvil rota / resize) =====
+  window.addEventListener('resize', () => {
+    try{
+      mainChart?.resize();
+      doctorsChart?.resize();
+      procChart?.resize();
+      compareChart?.resize();
+    }catch(e){}
+  });
+</script>
+
+<!-- Bootstrap JS -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

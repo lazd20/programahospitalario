@@ -1,0 +1,287 @@
+<?php
+/**
+ * mailer_notify.php
+ *
+ * Envía un correo cuando se agenda una cirugía:
+ *  - Bloque superior con datos de la cirugía recién creada
+ *  - Tabla de próximas cirugías con la MISMA estructura que la vista (email-safe):
+ *      Encabezado por fecha (📅 ... / 🕒 Última actualización ...)
+ *      Columnas: Paciente, Edad, Ingreso, Cirugía, Procedimiento, Q1, Q2,
+ *                Cirujano, Anestesiólogo, Habitación, CC, MT, Laboratorio, AC
+ *
+ * Requiere:
+ *  - PDO $pdo conectado
+ *  - Llamarse con sendSurgeryNotification($pdo, $newId)
+ */
+
+if (!function_exists('sendSurgeryNotification')) {
+    function sendSurgeryNotification(PDO $pdo, int $newId): void
+    {
+        // ===== CONFIG SMTP / DESTINATARIOS =====
+        // Credenciales reales proporcionadas por ti
+        $MAIL_FROM       = getenv('MAIL_FROM')       ?: 'notificaciones@realmedic.com.ec';
+        $MAIL_FROM_NAME  = getenv('MAIL_FROM_NAME')  ?: 'Realmedic · Quirófano';
+        $MAIL_TO = [
+            // Ajusta la lista de destinatarios
+            'janny_177@hotmail.com',
+            'comercial@realmedic.com.ec',
+            'orivera@realmedic.com.ec',
+            'lzambrano@realmedic.com.ec',
+            'luiszambra@gmail.com',
+            'oscar_river87@hotmail.com'
+        ];
+
+        // SMTP propio (SSL 465)
+        $SMTP_HOST   = getenv('SMTP_HOST')   ?: 'mail.realmedic.com.ec';
+        $SMTP_PORT   = getenv('SMTP_PORT')   ?: 465;
+        $SMTP_USER   = getenv('SMTP_USER')   ?: 'notificaciones@realmedic.com.ec';
+        $SMTP_PASS   = getenv('SMTP_PASS')   ?: 'As2019..1'; // <- credencial provista
+        $SMTP_SECURE = getenv('SMTP_SECURE') ?: 'ssl';       // 'ssl' para 465
+
+        // ===== CONSULTAS =====
+        // 1) Cirugía recién creada
+        $sqlOne = "SELECT pq.*,
+                          c.nombre AS nombre_cirujano
+                   FROM programacion_quirofano pq
+                   LEFT JOIN cirujanos c ON pq.cirujano_id = c.id
+                   WHERE pq.id = :id";
+        $st1 = $pdo->prepare($sqlOne);
+        $st1->execute([':id' => $newId]);
+        $cx = $st1->fetch(PDO::FETCH_ASSOC);
+        if (!$cx) return;
+
+        // 2) Próximas cirugías (desde hoy)
+        $sqlList = "SELECT pq.*,
+                           c.nombre AS nombre_cirujano
+                    FROM programacion_quirofano pq
+                    LEFT JOIN cirujanos c ON pq.cirujano_id = c.id
+                    WHERE pq.fecha >= CURDATE()
+                    ORDER BY pq.fecha, pq.h_cirugia";
+        $rows = $pdo->query($sqlList)->fetchAll(PDO::FETCH_ASSOC);
+
+        // ===== HELPERS (compat PHP < 7.4) =====
+        $h = function ($s) {
+            return htmlspecialchars((string)$s, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+        };
+        $fmtHora = function ($t) {
+            return $t ? date('H:i', strtotime($t)) : '';
+        };
+        $fmtFecha = function ($d) {
+            return $d ? date('d-m-Y', strtotime($d)) : '';
+        };
+
+        // ===== BLOQUE SUPERIOR (detalle de la nueva cirugía) =====
+        $qSel = ($cx['Q1'] === 'X') ? 'Q1' : (($cx['Q2'] === 'X') ? 'Q2' : '—');
+
+        $htmlTop =
+            '<div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;">' .
+            '  <h2 style="margin:0 0 8px;">Nueva cirugía programada</h2>' .
+            '  <p style="margin:4px 0 12px;color:#111;">Se registró una nueva cirugía en el sistema.</p>' .
+            '  <table cellpadding="8" cellspacing="0" style="border-collapse:collapse;border:1px solid #e5e7eb;font-size:14px;">' .
+            '    <tr><td><b>Fecha</b></td><td>' . $h($fmtFecha($cx['fecha'])) . ' (' . $h($cx['dia']) . ')</td></tr>' .
+            '    <tr><td><b>Paciente</b></td><td>' . $h($cx['paciente']) . '</td></tr>' .
+            '    <tr><td><b>Edad</b></td><td>' . $h($cx['edad']) . '</td></tr>' .
+            '    <tr><td><b>Ingreso</b></td><td>' . $h($fmtHora($cx['h_ingreso'])) . '</td></tr>' .
+            '    <tr><td><b>Cirugía</b></td><td>' . $h($fmtHora($cx['h_cirugia'])) . '</td></tr>' .
+            '    <tr><td><b>Procedimiento</b></td><td>' . $h($cx['procedimiento']) . '</td></tr>' .
+            '    <tr><td><b>Quirófano</b></td><td>' . $h($qSel) . '</td></tr>' .
+            '    <tr><td><b>Cirujano</b></td><td>' . $h($cx['nombre_cirujano']) . '</td></tr>' .
+            '    <tr><td><b>Anestesiólogo</b></td><td>' . $h($cx['anestesiologo']) . '</td></tr>' .
+            '    <tr><td><b>Habitación</b></td><td>' . $h($cx['habitacion']) . '</td></tr>' .
+            '    <tr><td><b>Arco en C</b></td><td>' . $h($cx['arco_en_c']) . '</td></tr>' .
+            '    <tr><td><b>Observaciones</b></td><td>' . nl2br($h($cx['laboratorio'])) . '</td></tr>' .
+            '  </table>' .
+            '  <p style="margin:16px 0 6px;color:#111;"><b>Próximas cirugías</b></p>';
+
+        // ===== TABLA TIPO ver_programacion (email-safe, sin JS/Bootstrap) =====
+        // Columnas (mismas que tu vista, excepto "Acciones")
+        $columnas = [
+            "Paciente","Edad","Ingreso","Cirugía","Procedimiento","Q1","Q2",
+            "Cirujano","Anestesiólogo","Habitación","CC","MT","Laboratorio","AC"
+        ];
+        $colCount = count($columnas);
+
+        // THEAD
+        $thead = '<tr style="background:#111827;color:#ffffff;text-align:left;">';
+        foreach ($columnas as $col) {
+            $thead .= '<th style="border:2px solid #000;padding:6px 8px;font-weight:700;">' . $h($col) . '</th>';
+        }
+        $thead .= '</tr>';
+
+        // TBODY (agrupado por fecha con fila "Fecha: ... / Última actualización ...")
+        $tbody = '';
+        $currentDate = null;
+
+        // Mapa de días EN->ES
+        $days = [
+            'Monday'    => 'Lunes',
+            'Tuesday'   => 'Martes',
+            'Wednesday' => 'Miércoles',
+            'Thursday'  => 'Jueves',
+            'Friday'    => 'Viernes',
+            'Saturday'  => 'Sábado',
+            'Sunday'    => 'Domingo'
+        ];
+
+        foreach ($rows as $row) {
+            if ($currentDate !== $row['fecha']) {
+                $currentDate = $row['fecha'];
+                $diaIng      = date('l', strtotime($currentDate));
+                $diaEs       = isset($days[$diaIng]) ? $days[$diaIng] : $diaIng;
+                $horaActual  = date('H:i:s');
+                $fechaHoy    = date('d/m/Y');
+                $fechaFmt    = $fmtFecha($currentDate);
+
+                $tbody .= '<tr>'
+                    . '<td colspan="' . $colCount . '" style="background:rgba(15,76,129,.08);'
+                    . 'border:2px solid #000;padding:8px 10px;font-weight:700;text-align:center;">'
+                    . '📅 Fecha: ' . $h($fechaFmt) . ' - ' . $h($diaEs)
+                    . ' <span style="color:#c00;font-size:12px;margin-left:20px;">'
+                    . '🕒 Última actualización: ' . $h($fechaHoy) . ' - ' . $h($horaActual) . '</span>'
+                    . '</td></tr>';
+            }
+
+            $isProtesis = ((int)($row['es_protesis'] ?? 0) === 1);
+            $h_ingreso  = $row['h_ingreso'] ? $fmtHora($row['h_ingreso']) : '';
+            $h_cirugia  = $row['h_cirugia'] ? $fmtHora($row['h_cirugia']) : '';
+
+            // Celdas en el MISMO orden que $columnas
+            $cells = [
+                $row['paciente'] ?? '',
+                $row['edad'] ?? '',
+                $h_ingreso,
+                $h_cirugia,
+                $row['procedimiento'] ?? '',
+                ((isset($row['Q1']) && $row['Q1'] === 'X') ? 'X' : ''),
+                ((isset($row['Q2']) && $row['Q2'] === 'X') ? 'X' : ''),
+                // nombre_cirujano viene del JOIN; si no, intenta 'cirujano'
+                isset($row['nombre_cirujano']) ? $row['nombre_cirujano'] : ($row['cirujano'] ?? ''),
+                $row['anestesiologo'] ?? '',
+                $row['habitacion'] ?? '',
+                $row['casa_comercial'] ?? '',
+                $row['mesa_traccion'] ?? '',
+                nl2br($h($row['laboratorio'] ?? '')), // laboratorio se envía con saltos
+                $row['arco_en_c'] ?? '',
+            ];
+
+            // Fila principal
+            $tbody .= '<tr>';
+            foreach ($cells as $idx => $val) {
+                // Estilo tipo “semáforo prótesis”: un leve fondo
+                $bg = $isProtesis ? ' background:#fff5f5;' : '';
+                // Para la columna "Laboratorio" (idx 12), ya usamos nl2br + h() arriba.
+                if ($idx === 12) {
+                    $tbody .= '<td style="border:2px solid #000;padding:6px 8px;vertical-align:top;' . $bg . '">' . $val . '</td>';
+                } else {
+                    $tbody .= '<td style="border:2px solid #000;padding:6px 8px;vertical-align:top;' . $bg . '">' . $h($val) . '</td>';
+                }
+            }
+            $tbody .= '</tr>';
+
+            // Si quisieras incluir una fila extra de “Detalles”, en email no hay toggle.
+            // Puedes descomentar esto:
+            /*
+            $tbody .= '<tr><td colspan="' . $colCount . '" style="border:2px solid #000;padding:8px 10px;background:#f9fafb;">'
+                    . '<strong>Detalles Adicionales:</strong><br>'
+                    . '<strong>Procedimiento:</strong> ' . $h($row['procedimiento']) . '<br>'
+                    . '<strong>Quirófano:</strong> '
+                    . (((isset($row['Q1']) && $row['Q1'] === 'X') ? 'Q1' : ((isset($row['Q2']) && $row['Q2'] === 'X') ? 'Q2' : 'Sin asignar')))
+                    . '<br>'
+                    . '<strong>Cirujano:</strong> ' . $h(isset($row['nombre_cirujano']) ? $row['nombre_cirujano'] : ($row['cirujano'] ?? '')) . '<br>'
+                    . '<strong>Anestesiólogo:</strong> ' . $h($row['anestesiologo'] ?? '') . '<br>'
+                    . '<strong>Habitación:</strong> ' . $h($row['habitacion'] ?? '') . '<br>'
+                    . '<strong>Casa Comercial:</strong> ' . $h($row['casa_comercial'] ?? '') . '<br>'
+                    . '<strong>Mesa de Tracción:</strong> ' . $h($row['mesa_traccion'] ?? '') . '<br>'
+                    . '<strong>Laboratorio:</strong> ' . nl2br($h($row['laboratorio'] ?? '')) . '<br>'
+                    . '<strong>Arco en C:</strong> ' . $h($row['arco_en_c'] ?? '') .
+                    '</td></tr>';
+            */
+        }
+
+        // Render final de la tabla (con borde grueso para parecerse a tu vista)
+        $htmlTable =
+            '<table cellpadding="0" cellspacing="0" style="border-collapse:collapse;width:100%;' .
+            'font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;font-size:13px;border:2px solid #000;">' .
+            '<thead>' . $thead . '</thead><tbody>' . $tbody . '</tbody></table>';
+
+        // ===== FOOTER =====
+        $htmlFooter =
+            '<p style="margin:10px 0 0;color:#6b7280;font-size:12px;">' .
+            'Este es un correo automático. Ver detalle en el sistema: ' .
+            '<a href="https://realmedic.com.ec/proq/ver_programacion.php">ver programación</a>.' .
+            '</p></div>';
+
+        $subject  = 'Nueva cirugía programada — ' . date('d-m-Y', strtotime($cx['fecha'])) . ' · ' . $cx['paciente'];
+        $bodyHtml = $htmlTop . $htmlTable . $htmlFooter;
+
+        // ===== ENVÍO: PHPMailer (si disponible) o mail() =====
+        $sent = false;
+        try {
+            // Cargar Composer autoload si existe
+            if (file_exists(__DIR__ . '/vendor/autoload.php')) {
+                require_once __DIR__ . '/vendor/autoload.php';
+            } else {
+                // Includes directos por si PHPMailer está copiado manualmente
+                @require_once __DIR__ . '/vendor/phpmailer/phpmailer/src/PHPMailer.php';
+                @require_once __DIR__ . '/vendor/phpmailer/phpmailer/src/SMTP.php';
+                @require_once __DIR__ . '/vendor/phpmailer/phpmailer/src/Exception.php';
+            }
+
+            if (class_exists('PHPMailer\\PHPMailer\\PHPMailer')) {
+                $mail = new PHPMailer\PHPMailer\PHPMailer(true);
+                if (!empty($SMTP_HOST) && !empty($SMTP_USER)) {
+                    $mail->isSMTP();
+                    $mail->Host       = $SMTP_HOST;
+                    $mail->SMTPAuth   = true;
+                    $mail->Username   = $SMTP_USER;
+                    $mail->Password   = $SMTP_PASS;
+                    $mail->SMTPSecure = $SMTP_SECURE; // 'ssl' para 465
+                    $mail->Port       = (int)$SMTP_PORT; // 465
+                    // Envelope sender (ayuda a SPF)
+                    $mail->Sender     = $MAIL_FROM;
+                }
+                $mail->CharSet = 'UTF-8';
+                $mail->setFrom($MAIL_FROM, $MAIL_FROM_NAME);
+                // Opcional: Reply-To para canal operativo
+                $mail->addReplyTo('coordinacion@realmedic.com.ec', 'Coordinación Quirófano');
+                foreach ($MAIL_TO as $to) {
+                    $mail->addAddress($to);
+                }
+                $mail->Subject = $subject;
+                $mail->isHTML(true);
+                $mail->Body    = $bodyHtml;
+                $mail->AltBody = strip_tags(
+                    str_replace(
+                        ['<br>','<br/>','</tr>','</p>'],
+                        ["\n","\n","\n","\n"],
+                        $bodyHtml
+                    )
+                );
+                // Gmail-friendly
+                $mail->addCustomHeader('List-Unsubscribe', '<mailto:' . $MAIL_FROM . '>');
+                // DKIM (activar cuando tengas la clave y selector en DNS)
+                // $mail->DKIM_domain   = 'realmedic.com.ec';
+                // $mail->DKIM_selector = 'default';
+                // $mail->DKIM_private  = __DIR__ . '/dkim_private.key';
+                // $mail->DKIM_identity = $MAIL_FROM;
+
+                $mail->send();
+                $sent = true;
+            }
+        } catch (Throwable $e) {
+            error_log('[PHPMailer] ' . $e->getMessage());
+            $sent = false;
+        }
+
+        // Fallback usando mail()
+        if (!$sent) {
+            $headers  = "MIME-Version: 1.0\r\n";
+            $headers .= "Content-type: text/html; charset=UTF-8\r\n";
+            $headers .= "From: {$MAIL_FROM_NAME} <{$MAIL_FROM}>\r\n";
+            foreach ($MAIL_TO as $to) {
+                @mail($to, '=?UTF-8?B?' . base64_encode($subject) . '?=', $bodyHtml, $headers);
+            }
+        }
+    }
+}
+?>

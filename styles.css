@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Programación de Quirófanos</title>
+    <!-- Enlace a Bootstrap -->
+    <link href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Enlace a tu archivo de estilos personalizado -->
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <?php
+    ini_set('display_errors', 1);
+    ini_set('display_startup_errors', 1);
+    error_reporting(E_ALL);
+    ?>
+    <div class="container mt-5">
+        <h2 class="text-center mb-4">Programación de Quirófano</h2>
+        <form action="guardar_programacion.php" method="POST">
+            <div class="form-row">
+                <div class="form-group col-md-4">
+                    <label for="dia">Día:</label>
+                    <input type="text" id="dia" name="dia" class="form-control" required>
+                </div>
+                <div class="form-group col-md-4">
+                    <label for="fecha">Fecha:</label>
+                    <input type="date" id="fecha" name="fecha" class="form-control" required>
+                </div>
+                <div class="form-group col-md-4">
+                    <label for="paciente">Paciente:</label>
+                    <input type="text" id="paciente" name="paciente" class="form-control" required>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group col-md-4">
+                    <label for="edad">Edad:</label>
+                    <input type="number" id="edad" name="edad" class="form-control" required>
+                </div>
+                <div class="form-group col-md-4">
+                    <label for="h_ingreso">Hora de Ingreso:</label>
+                    <input type="time" id="h_ingreso" name="h_ingreso" class="form-control" required>
+                </div>
+                <div class="form-group col-md-4">
+                    <label for="h_cirugia">Hora de Cirugía:</label>
+                    <input type="time" id="h_cirugia" name="h_cirugia" class="form-control" required>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group col-md-4">
+                    <label for="procedimiento">Procedimiento:</label>
+                    <input type="text" id="procedimiento" name="procedimiento" class="form-control" required>
+                </div>
+                <div class="form-group col-md-4">
+                    <label for="quirófano">Quirófano:</label>
+                    <select id="quirófano" name="quirófano" class="form-control">
+                        <option value="Q1">Q1</option>
+                        <option value="Q2">Q2</option>
+                    </select>
+                </div>
+                <div class="form-group col-md-4">
+                    <label for="cirujano">Cirujano:</label>
+                    <input type="text" id="cirujano" name="cirujano" class="form-control" required>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group col-md-4">
+                    <label for="anestesiologo">Anestesiólogo:</label>
+                    <input type="text" id="anestesiologo" name="anestesiologo" class="form-control" required>
+                </div>
+                <div class="form-group col-md-4">
+                    <label for="habitacion">Habitación:</label>
+                    <select id="habitacion" name="habitacion" class="form-control">
+                        <option value="Ambulatorio">Ambulatorio</option>
+                        <option value="Internado">Internado</option>
+                    </select>
+                </div>
+                <div class="form-group col-md-4">
+                    <label for="casa_comercial">Casa Comercial:</label>
+                    <select id="casa_comercial" name="casa_comercial" class="form-control">
+                        <option value="SI">SI</option>
+                        <option value="NO">NO</option>
+                    </select>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group col-md-4">
+                    <label for="mesa_traccion">Mesa de Tracción:</label>
+                    <select id="mesa_traccion" name="mesa_traccion" class="form-control">
+                        <option value="SI">SI</option>
+                        <option value="NO">NO</option>
+                    </select>
+                </div>
+                <div class="form-group col-md-4">
+                    <label for="laboratorio">Laboratorio:</label>
+                    <textarea id="laboratorio" name="laboratorio" class="form-control"></textarea>
+                </div>
+                <div class="form-group col-md-4">
+                    <label for="arco_en_c">Arco en C:</label>
+                    <select id="arco_en_c" name="arco_en_c" class="form-control">
+                        <option value="SI">SI</option>
+                        <option value="NO">NO</option>
+                    </select>
+                </div>
+            </div>
+            <button type="submit" class="btn btn-primary btn-block">Guardar Programación</button>
+        </form>
+    </div>
+</body>
+</html>
